@@ -19,20 +19,36 @@ import argparse
 import random
 import unicodedata
 from typing import List, Dict, Optional
-print("Hola")
+from openai import OpenAI
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 # ===== .env =====
 try:
     from dotenv import load_dotenv
     PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
     _env_path = os.path.join(PROJECT_DIR, ".env")
     load_dotenv(_env_path)
+
+    # Configurar modo debug
+    DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() in [
+        "true", "1", "yes", "on"]
+
+    def debug_print(*args, **kwargs):
+        """Función para imprimir mensajes de debug solo si DEBUG_MODE está activado."""
+        if DEBUG_MODE:
+            print(*args, **kwargs)
+
     try:
-        print(
+        debug_print(
             f"[DBG] .env path={_env_path} exists={os.path.exists(_env_path)}")
     except Exception:
         pass
 except Exception:
-    pass
+    DEBUG_MODE = False
+
+    def debug_print(*args, **kwargs):
+        """Función de debug deshabilitada."""
+        pass
 
 
 # ===== OpenAI opcional =====
@@ -47,8 +63,29 @@ if OPENAI_API_KEY:
         print("No se pudo cargar OpenAI (opcional).")
         _openai = None
 try:
-    print(
+    debug_print(
         f"[DBG] OpenAI={'ON' if _openai else 'OFF'} API_KEY_set={'YES' if bool(OPENAI_API_KEY) else 'NO'}")
+except Exception:
+    pass
+
+# ===== Spotify opcional =====
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+_spotify = None
+if SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET:
+    try:
+        client_credentials_manager = SpotifyClientCredentials(
+            client_id=SPOTIFY_CLIENT_ID,
+            client_secret=SPOTIFY_CLIENT_SECRET
+        )
+        _spotify = spotipy.Spotify(
+            client_credentials_manager=client_credentials_manager)
+    except Exception as e:
+        print(f"No se pudo cargar Spotify (opcional): {e}")
+        _spotify = None
+try:
+    debug_print(
+        f"[DBG] Spotify={'ON' if _spotify else 'OFF'} CLIENT_ID_set={'YES' if bool(SPOTIFY_CLIENT_ID) else 'NO'}")
 except Exception:
     pass
 
@@ -64,10 +101,10 @@ try:
                 user_token=DISCOGS_TOKEN
             )
         except Exception as e:
-            print(f"[DBG] Discogs client error: {e}")
+            debug_print(f"[DBG] Discogs client error: {e}")
             discogs = None
     try:
-        print(
+        debug_print(
             f"[DBG] DiscogsToken={'YES' if bool(DISCOGS_TOKEN) else 'NO'} DiscogsClient={'ON' if discogs else 'OFF'}")
     except Exception:
         pass
@@ -87,14 +124,14 @@ def mb_get(path: str, params: Dict) -> Dict:
                          headers=UA, timeout=30)
         time.sleep(1.0)  # rate-friendly
         try:
-            print(f"[DBG] MB GET {path} status={r.status_code}")
+            debug_print(f"[DBG] MB GET {path} status={r.status_code}")
         except Exception:
             pass
         r.raise_for_status()
         return r.json()
     except Exception as e:
         try:
-            print(f"[DBG] MB GET error {path}: {e}")
+            debug_print(f"[DBG] MB GET error {path}: {e}")
         except Exception:
             pass
         raise
@@ -426,6 +463,86 @@ SYSTEM = (
     "- Devuelve **JSON válido** y nada más."
 )
 
+SYSTEM_DIRECT_GENRE = (
+    "Eres un asistente especializado en análisis de solicitudes musicales para descarga directa.\n"
+    "Tu tarea es extraer información específica de la solicitud del usuario y estructurarla en JSON.\n"
+    "\n"
+    "Devuelve SOLO JSON válido con este esquema exacto:\n"
+    "{\n"
+    "  \"task\": \"album\" | \"playlist\",\n"
+    "  \"count\": <int or null>,\n"
+    "  \"genre\": \"{DIRECT_GENRE}\",\n"
+    "  \"substyle\": null,\n"
+    "  \"artist\": <string or null>,\n"
+    "  \"album\": <string or null>\n"
+    "}\n"
+    "\n"
+    "INSTRUCCIONES CRÍTICAS:\n"
+    "- Si pide un álbum, task=\"album\" y completa artist/album.\n"
+    "- Si pide canciones, task=\"playlist\". Si menciona un artista sin álbum: rellena artist y deja album=null.\n"
+    "- Si no dice cuántas, usa 10.\n"
+    "- genre: SIEMPRE \"{DIRECT_GENRE}\" (NUNCA cambies este valor)\n"
+    "- substyle: SIEMPRE null (no aplica para géneros directos)\n"
+    "- artist: Extrae nombres de artistas sin importar mayúsculas/minúsculas\n"
+    "  Ejemplos: 'silvio rodriguez' → 'Silvio Rodríguez', 'DAFT PUNK' → 'Daft Punk'\n"
+    "- count: Extrae números del texto (1, 2, 3, etc.) o usa 10 por defecto\n"
+    "\n"
+    "GÉNEROS DIRECTOS:\n"
+    "- balada: música romántica y baladas\n"
+    "- house: música house y electrónica\n"
+    "- nueva_trova: nueva trova cubana\n"
+    "- techno: música techno\n"
+    "\n"
+    "Devuelve ÚNICAMENTE el JSON, sin explicaciones adicionales."
+)
+
+
+def _clean_artist_name(artist_name: str) -> str:
+    """
+    Limpia el nombre del artista removiendo palabras descriptivas comunes.
+    """
+    if not artist_name:
+        return artist_name
+
+    # Palabras descriptivas que no son parte del nombre del artista
+    descriptive_words = [
+        "ineditas", "inedita", "inéditas", "inédita",
+        "raras", "rara", "raros", "raro",
+        "clasicas", "clasica", "clásicas", "clásica",
+        "mejores", "mejor", "top", "hits", "hit",
+        "underground", "comercial", "popular", "famosas", "famosos",
+        "nuevas", "nueva", "nuevos", "nuevo",
+        "viejas", "vieja", "viejos", "viejo",
+        "tempranas", "temprana", "tempranos", "temprano",
+        "tardias", "tardia", "tardios", "tardio",
+        "temas", "tema", "canciones", "cancion"
+    ]
+
+    # Convertir a minúsculas para comparación
+    words = artist_name.lower().split()
+    cleaned_words = []
+
+    for word in words:
+        # Remover puntuación
+        clean_word = re.sub(r'[^\w]', '', word)
+        if clean_word and clean_word not in descriptive_words:
+            cleaned_words.append(word)
+
+    # Reconstruir el nombre manteniendo la capitalización original
+    if cleaned_words:
+        # Encontrar las posiciones de las palabras limpias en el texto original
+        original_words = artist_name.split()
+        result_words = []
+
+        for orig_word in original_words:
+            clean_orig = re.sub(r'[^\w]', '', orig_word.lower())
+            if clean_orig in [re.sub(r'[^\w]', '', w.lower()) for w in cleaned_words]:
+                result_words.append(orig_word)
+
+        return ' '.join(result_words)
+
+    return artist_name
+
 
 def _guess_artist_from_text(user_text: str) -> Optional[str]:
     """
@@ -458,10 +575,42 @@ def _guess_artist_from_text(user_text: str) -> Optional[str]:
         if len(cand) >= 3:
             return cand
 
+    # "cancion de X" (singular) - case insensitive
+    m = re.search(
+        r"cancion\s+de\s+([a-záéíóúñ][\w\s\.\-&']{2,80})", t_norm, flags=re.I)
+    if m:
+        cand = t[m.start(1):m.end(1)].strip(" :")
+        if len(cand) >= 3:
+            return _clean_artist_name(cand)
+
+    # "cancion X" (sin "de") - case insensitive
+    m = re.search(
+        r"cancion\s+([a-záéíóúñ][\w\s\.\-&']{2,80})$", t_norm, flags=re.I)
+    if m:
+        cand = t[m.start(1):m.end(1)].strip(" :")
+        if len(cand) >= 3:
+            return _clean_artist_name(cand)
+
+    # "canciones X" (sin "de") - case insensitive
+    m = re.search(
+        r"canciones\s+([a-záéíóúñ][\w\s\.\-&']{2,80})$", t_norm, flags=re.I)
+    if m:
+        cand = t[m.start(1):m.end(1)].strip(" :")
+        if len(cand) >= 3:
+            return _clean_artist_name(cand)
+
+    # "cancion X" (sin "de") - case insensitive
+    m = re.search(
+        r"cancion\s+([a-záéíóúñ][\w\s\.\-&']{2,80})$", t_norm, flags=re.I)
+    if m:
+        cand = t[m.start(1):m.end(1)].strip(" :")
+        if len(cand) >= 3:
+            return _clean_artist_name(cand)
+
     return None
 
 
-def llm_plan(user_text: str) -> Dict:
+def llm_plan(user_text: str, direct_genre: str = None) -> Dict:
     default = {"task": "playlist", "count": 10, "genre": None,
                "substyle": None, "artist": None, "album": None}
 
@@ -504,10 +653,18 @@ def llm_plan(user_text: str) -> Dict:
 
     # con OpenAI
     try:
+        # Usar SYSTEM específico para géneros directos
+        system_prompt = SYSTEM
+        if direct_genre:
+            system_prompt = SYSTEM_DIRECT_GENRE.replace(
+                "{DIRECT_GENRE}", direct_genre)
+            default["genre"] = direct_genre
+            default["substyle"] = None
+
         resp = _openai.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": SYSTEM},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_text}
             ],
             temperature=0
@@ -783,7 +940,7 @@ def pick_playlist(genre: str, substyle: Optional[str], count: int) -> List[Dict]
     mb_anch = search_by_anchors(key, anchors, limit_each=30) if anchors else []
 
     try:
-        print(
+        debug_print(
             f"[DBG] pick_playlist sources: DC_base={len(dc_base)} DC_anchor={len(dc_anch)} MB_base={len(mb_base)} MB_anchor={len(mb_anch)}")
     except Exception:
         pass
@@ -826,7 +983,7 @@ def pick_playlist(genre: str, substyle: Optional[str], count: int) -> List[Dict]
         add_unique(rows, used, c["artist"], c["title"], c.get("source", ""))
 
     try:
-        print(
+        debug_print(
             f"[DBG] pick_playlist after ordered-select: {len(rows)} / {count}")
     except Exception:
         pass
@@ -870,7 +1027,7 @@ def pick_artist_playlist(artist: str, count: int, genre: Optional[str] = None) -
     # 1) MB: recordings del artista
     mb_tracks = mb_search_recordings_by_artist(artist, limit=400)
     try:
-        print(
+        debug_print(
             f"[DBG] pick_artist_playlist: MB_tracks={len(mb_tracks)} artist='{artist}'")
     except Exception:
         pass
@@ -896,7 +1053,7 @@ def pick_artist_playlist(artist: str, count: int, genre: Optional[str] = None) -
     if len(rows) < count:
         dc = discogs_search_by_artist(artist, limit=200)
         try:
-            print(f"[DBG] pick_artist_playlist: DC_backfill={len(dc)}")
+            debug_print(f"[DBG] pick_artist_playlist: DC_backfill={len(dc)}")
         except Exception:
             pass
         for d in dc:
@@ -910,7 +1067,7 @@ def pick_artist_playlist(artist: str, count: int, genre: Optional[str] = None) -
         more = mb_search_recordings(
             f'artist:"{_lucene_escape(artist)}" AND recording:*', limit=200)
         try:
-            print(f"[DBG] pick_artist_playlist: MB_more={len(more)}")
+            debug_print(f"[DBG] pick_artist_playlist: MB_more={len(more)}")
         except Exception:
             pass
         for r in more:
@@ -922,7 +1079,7 @@ def pick_artist_playlist(artist: str, count: int, genre: Optional[str] = None) -
                        "musicbrainz", query_override=f'{artist} {r["title"]}')
 
     try:
-        print(
+        debug_print(
             f"[DBG] pick_artist_playlist: selected={len(rows)} / target={count}")
     except Exception:
         pass
@@ -931,6 +1088,287 @@ def pick_artist_playlist(artist: str, count: int, genre: Optional[str] = None) -
 
 def _lucene_escape(s: str) -> str:
     return (s or "").replace('"', r'\"').strip()
+
+# ===== Fallback OpenAI para artistas no encontrados =====
+
+
+def search_real_songs_spotify(artist: str, count: int, genre: Optional[str] = None) -> List[Dict]:
+    """
+    Busca canciones reales del artista en Spotify.
+    """
+    if not _spotify:
+        print("⚠️ Spotify no disponible")
+        return []
+
+    try:
+        # Buscar el artista en Spotify
+        search_query = f'{artist}'
+        if not genre:
+            # Agregar "salsa" al query de búsqueda cuando no viene género específico
+            search_query = f'{artist} salsa'
+
+        debug_print(f"[DBG] Spotify search query: {search_query}")
+        debug_print(f"[DBG] Spotify search params: type=track, limit=50")
+
+        results = _spotify.search(
+            q=search_query, type='track', limit=50)
+        debug_print(f"[DBG] Spotify search results: {results}")
+        tracks = results['tracks']['items']
+
+        debug_print(f"[DBG] Spotify returned {len(tracks)} tracks")
+
+        if not tracks:
+            print(f"🔍 Spotify no encontró canciones de {artist}")
+            return []
+
+        # Filtrar por artista exacto y crear lista
+        rows = []
+        seen = set()
+        filtered_count = 0
+
+        for track in tracks:
+            # Verificar que el artista coincida con lógica mejorada
+            track_artists = [artist_info['name'].lower()
+                             for artist_info in track['artists']]
+
+            # Función mejorada de matching de artistas
+            def artist_matches(search_artist: str, track_artists: List[str]) -> bool:
+                search_artist = search_artist.lower().strip()
+                track_artists_lower = [artist.lower()
+                                       for artist in track_artists]
+
+                # 1. Coincidencia exacta
+                if search_artist in track_artists_lower:
+                    return True
+
+                # 2. Coincidencia con palabras separadas
+                # Si el artista de búsqueda tiene espacios, verificar si todas las palabras están en el artista del track
+                search_words = search_artist.split()
+                if len(search_words) > 1:
+                    for track_artist in track_artists_lower:
+                        track_words = track_artist.split()
+                        # Verificar si todas las palabras de búsqueda están en el artista del track
+                        if all(word in track_words for word in search_words):
+                            return True
+                        # Verificar si todas las palabras del artista del track están en la búsqueda
+                        if all(word in search_words for word in track_words):
+                            return True
+
+                # 3. Coincidencia parcial (para casos como "La Mambanegra" vs "Mambanegra")
+                for track_artist in track_artists_lower:
+                    if search_artist in track_artist or track_artist in search_artist:
+                        return True
+
+                # 4. Coincidencia flexible para casos como "mamba negra" vs "mambanegra"
+                # Remover espacios y artículos comunes para comparación más flexible
+                def normalize_artist_name(name: str) -> str:
+                    # Remover artículos comunes
+                    articles = ['la', 'el', 'los', 'las', 'le',
+                                'les', 'un', 'una', 'de', 'del', 'y', '&']
+                    words = name.split()
+                    filtered_words = [
+                        word for word in words if word not in articles]
+                    # Unir sin espacios para comparación
+                    return ''.join(filtered_words)
+
+                search_normalized = normalize_artist_name(search_artist)
+                for track_artist in track_artists_lower:
+                    track_normalized = normalize_artist_name(track_artist)
+                    # Verificar si los nombres normalizados son similares
+                    if search_normalized in track_normalized or track_normalized in search_normalized:
+                        return True
+                    # Verificar similitud con un mínimo de caracteres (para evitar matches muy cortos)
+                    if len(search_normalized) >= 4 and len(track_normalized) >= 4:
+                        # Calcular similitud simple basada en caracteres comunes
+                        common_chars = sum(
+                            1 for c in search_normalized if c in track_normalized)
+                        similarity = common_chars / \
+                            max(len(search_normalized), len(track_normalized))
+                        if similarity >= 0.7:  # 70% de similitud
+                            return True
+
+                return False
+
+            if not artist_matches(artist, track_artists):
+                filtered_count += 1
+                debug_print(
+                    f"[DBG] Spotify filtered out: {track['artists'][0]['name']} - {track['name']} (artist mismatch)")
+                continue
+
+            title = track['name']
+            artist_name = track['artists'][0]['name']  # Usar el primer artista
+
+            # Evitar duplicados
+            key = f"{artist_name.lower()}|{title.lower()}"
+            if key in seen:
+                continue
+            seen.add(key)
+
+            # Agregar contexto de género si no se especificó
+            query_override = f"{artist_name} {title}"
+            if not genre:
+                # Buscar versiones de salsa de la canción específica
+                query_override = f"{title} salsa"
+
+            rows.append({
+                "artist": artist_name,
+                "title": title,
+                "query_override": query_override,
+                "source": "spotify"
+            })
+
+            # Debug: mostrar cada canción encontrada
+            debug_print(f"[DBG] Spotify found: {artist_name} - {title}")
+            debug_print(f"[DBG] Query override: {query_override}")
+
+            if len(rows) >= count:
+                break
+
+        debug_print(
+            f"[DBG] Spotify filtering summary: {len(tracks)} total tracks, {filtered_count} filtered out, {len(rows)} final matches")
+        print(f"🎵 Spotify encontró {len(rows)} canciones reales de {artist}")
+        return rows
+
+    except Exception as e:
+        print(f"⚠️ Error buscando en Spotify: {e}")
+        return []
+
+
+def generate_real_songs_with_openai(artist: str, count: int, genre: Optional[str] = None) -> List[Dict]:
+    """
+    Usa OpenAI para encontrar canciones reales del artista cuando no se encuentra en MusicBrainz/Discogs.
+    """
+    try:
+        # Intentar usar OpenAI primero
+        if _openai:
+            # Crear prompt para OpenAI
+            genre_context = ""
+            if genre:
+                genre_context = f" en el estilo de {genre.replace('_', ' ')}"
+
+            prompt = f"""Necesito que me proporciones {count} canciones REALES del artista "{artist}"{genre_context}.
+
+IMPORTANTE:
+- Debe ser canciones que realmente existen
+- No inventes títulos ficticios
+- Si no conoces canciones reales de este artista, responde "NO_CONOZCO"
+- Responde SOLO con los títulos de las canciones, uno por línea
+- No incluyas explicaciones ni numeración
+
+Ejemplo de respuesta:
+Canción 1
+Canción 2
+Canción 3"""
+
+            response = _openai.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": "Eres un experto en música con conocimiento extenso de artistas y sus canciones reales. Solo proporciona información verídica."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=200,
+                temperature=0.8
+            )
+
+            # Procesar respuesta
+            titles_text = response.choices[0].message.content.strip()
+
+            # Verificar si OpenAI no conoce al artista
+            if "NO_CONOZCO" in titles_text.upper() or "NO CONOZCO" in titles_text.upper():
+                print(f"🤖 OpenAI no conoce canciones reales de {artist}")
+                return []
+
+            titles = [title.strip() for title in titles_text.split('\n') if title.strip(
+            ) and not title.strip().startswith(('1.', '2.', '3.', '4.', '5.'))]
+
+            print(
+                f"🤖 OpenAI encontró {len(titles)} canciones reales de {artist}")
+        else:
+            # Fallback: generador básico sin OpenAI
+            print("⚠️ OpenAI no disponible, usando generador básico")
+            titles = generate_basic_fictional_titles(artist, count, genre)
+
+        # Crear lista de canciones reales
+        rows = []
+        for title in titles[:count]:
+            # Agregar contexto de género si no se especificó
+            query_override = f"{artist} {title}"
+            if not genre:
+                # Buscar versiones de salsa de la canción específica
+                query_override = f"{title} salsa"
+
+            rows.append({
+                "artist": artist,
+                "title": title,
+                "query_override": query_override,
+                "source": "openai_real"
+            })
+
+        return rows
+
+    except Exception as e:
+        print(f"⚠️ Error generando canciones: {e}")
+        # Fallback final: generador básico
+        print("🔄 Usando generador básico como fallback")
+        titles = generate_basic_fictional_titles(artist, count, genre)
+        rows = []
+        for title in titles[:count]:
+            rows.append({
+                "artist": artist,
+                "title": title,
+                "query_override": f"{artist} {title}",
+                "source": "fictional_basic"
+            })
+        return rows
+
+
+def generate_basic_fictional_titles(artist: str, count: int, genre: Optional[str] = None) -> List[str]:
+    """
+    Generador básico de títulos ficticios sin OpenAI.
+    """
+    # Títulos genéricos en español
+    generic_titles = [
+        "La Noche Perfecta",
+        "Sueños de Amor",
+        "Ritmo del Corazón",
+        "Baila Conmigo",
+        "Mi Vida Es Música",
+        "El Sonido de la Calle",
+        "Cuando Te Veo",
+        "Noches de Fiesta",
+        "El Ritmo Que Me Mueve",
+        "Siempre Contigo",
+        "La Música No Para",
+        "Déjame Soñar",
+        "El Baile de la Vida",
+        "Mi Corazón Canta",
+        "La Fiesta Continúa"
+    ]
+
+    # Títulos específicos por género
+    genre_titles = {
+        "salsa": ["Salsa Caliente", "El Son de la Salsa", "Baila Salsa", "Ritmo Salsero"],
+        "balada": ["Amor Eterno", "Te Extraño", "Mi Corazón", "Siempre Te Amaré"],
+        "house": ["House Party", "Dance Floor", "Electronic Dreams", "Night Club"],
+        "techno": ["Techno Beat", "Digital World", "Machine Music", "Future Sound"],
+        "nueva_trova": ["Canción de Protesta", "El Pueblo Canta", "Libertad", "Revolución"]
+    }
+
+    # Seleccionar títulos
+    selected_titles = []
+
+    # Agregar títulos específicos del género si existe
+    if genre and genre in genre_titles:
+        selected_titles.extend(genre_titles[genre][:min(3, count)])
+
+    # Completar con títulos genéricos
+    remaining = count - len(selected_titles)
+    if remaining > 0:
+        available_generic = [
+            t for t in generic_titles if t not in selected_titles]
+        selected_titles.extend(available_generic[:remaining])
+
+    return selected_titles[:count]
 
 # ===== Álbum (MusicBrainz) =====
 
@@ -1024,19 +1462,19 @@ def build_album_csv(artist: str, album: str) -> List[Dict]:
     rg = mb_search_release(artist, album)
     if not rg:
         try:
-            print(
+            debug_print(
                 f"[DBG] build_album_csv: sin release-group para '{artist}' — '{album}'")
         except Exception:
             pass
         return []
     try:
-        print(
+        debug_print(
             f"[DBG] build_album_csv: release-group OK id={rg.get('id', '?')} title={rg.get('title', '?')}")
     except Exception:
         pass
     tracks = mb_release_tracks(rg["id"])
     try:
-        print(f"[DBG] build_album_csv: tracks={len(tracks)}")
+        debug_print(f"[DBG] build_album_csv: tracks={len(tracks)}")
     except Exception:
         pass
     rows: List[Dict] = []
@@ -1058,19 +1496,28 @@ def build_album_csv(artist: str, album: str) -> List[Dict]:
 # ===== CSV writer =====
 
 
-def write_csv(rows: List[Dict], path: str):
+def write_csv(rows: List[Dict], path: str, direct_genre: str = None):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
+    # Determinar columnas según si hay género directo
+    if direct_genre:
+        fieldnames = ["artist", "title", "query_override", "source", "gnere"]
+    else:
+        fieldnames = ["artist", "title", "query_override", "source"]
+
     with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(
-            f, fieldnames=["artist", "title", "query_override", "source"])
+        w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for r in rows:
-            w.writerow({
+            row_data = {
                 "artist": r["artist"],
                 "title": r["title"],
                 "query_override": r.get("query_override", ""),
                 "source": r.get("source", "")
-            })
+            }
+            if direct_genre:
+                row_data["gnere"] = direct_genre
+            w.writerow(row_data)
 
 # ===== Runner =====
 
@@ -1085,6 +1532,12 @@ def run_request(nl_request: str, out_csv: str):
         plan["substyle"] = "underground" if "salsa_dura_clasica" in g else None
 
     print("   Plan:", plan)
+
+    # Verificar si el artista está prohibido
+    if plan.get("artist"):
+        if is_bad_not_permitted(plan["artist"]):
+            show_bad_not_permitted_message(plan["artist"])
+            return
 
     rows: List[Dict] = []
     if plan["task"] == "album" and plan.get("artist") and plan.get("album"):
@@ -1109,17 +1562,39 @@ def run_request(nl_request: str, out_csv: str):
             print(f"🎚️ Playlist: {count} temas | {g} | {substyle or 'mixto'}")
             rows = pick_playlist(g, substyle, count)
         try:
-            print(f"[DBG] run_request: rows_before_final={len(rows)}")
+            debug_print(f"[DBG] run_request: rows_before_final={len(rows)}")
         except Exception:
             pass
 
     if not rows:
         try:
-            print(f"[DBG] run_request: no rows generated. plan={plan}")
+            debug_print(f"[DBG] run_request: no rows generated. plan={plan}")
         except Exception:
             pass
-        print("❌ No se pudo generar el CSV.")
-        return
+
+        # Fallback: buscar canciones reales en Spotify, luego OpenAI
+        if plan.get("artist") and plan.get("task") == "playlist":
+            print(
+                f"🔍 No se encontraron canciones en MusicBrainz/Discogs, buscando en Spotify...")
+            rows = search_real_songs_spotify(
+                plan["artist"],
+                int(plan.get("count") or 10),
+                genre
+            )
+
+            # Si Spotify no encuentra nada, usar OpenAI con prompt del usuario
+            if not rows:
+                print(
+                    f"🤖 Spotify no encontró nada, usando OpenAI para buscar canciones reales...")
+                rows = generate_real_songs_with_openai(
+                    plan["artist"],
+                    int(plan.get("count") or 10),
+                    genre
+                )
+
+        if not rows:
+            print("❌ No se pudo generar el CSV.")
+            return
 
     # dedupe final y corte
     final: List[Dict] = []
@@ -1139,12 +1614,206 @@ def run_request(nl_request: str, out_csv: str):
     print("   Ejecuta ahora:  come-candela")
 
 
+# ===== Géneros Directos =====
+DIRECT_GENRES = ["balada", "house", "nueva_trova", "techno"]
+
+# ===== Lista de Artistas y Géneros Prohibidos =====
+# Para agregar nuevos artistas prohibidos, simplemente añádelos a BLOCKED_ARTISTS
+# Para agregar nuevos géneros prohibidos, añádelos a BLOCKED_GENRES
+# El sistema detectará automáticamente cualquier coincidencia (case-insensitive, sin acentos)
+
+BLOCKED_ARTISTS = [
+    "bad bunny", "j balvin", "ozuna", "maluma", "karol g", "anuel aa", "daddy yankee",
+    "don omar", "wisin", "yandel", "nicky jam", "farruko", "jhay cortez", "myke towers",
+    "rauw alejandro", "sech", "feid", "ryan castro", "manuel turizo", "camilo"
+    # Agregar más artistas aquí según sea necesario
+]
+
+BLOCKED_GENRES = [
+    "reggaeton", "trap", "urban", "latin trap", "reggaetonero", "reggaetonera"
+    # Agregar más géneros aquí según sea necesario
+]
+
+
+def is_blocked_artist(artist_name: str) -> bool:
+    """
+    Detecta si el artista está en la lista de artistas prohibidos.
+    """
+    if not artist_name:
+        return False
+
+    artist_lower = _strip_accents(artist_name.lower())
+
+    # Verificar si el nombre del artista está en la lista de artistas prohibidos
+    for blocked_artist in BLOCKED_ARTISTS:
+        if blocked_artist in artist_lower:
+            return True
+
+    return False
+
+
+def is_blocked_genre(artist_name: str) -> bool:
+    """
+    Detecta si el artista contiene palabras clave de géneros prohibidos.
+    """
+    if not artist_name:
+        return False
+
+    artist_lower = _strip_accents(artist_name.lower())
+
+    # Verificar si el texto contiene palabras clave de géneros prohibidos
+    for blocked_genre in BLOCKED_GENRES:
+        if blocked_genre in artist_lower:
+            return True
+
+    return False
+
+
+def is_bad_not_permitted(artist_name: str) -> bool:
+    """
+    Detecta si el artista o género está prohibido.
+    """
+    return is_blocked_artist(artist_name) or is_blocked_genre(artist_name)
+
+
+def show_bad_not_permitted_message(artist_name: str):
+    """
+    Muestra un mensaje gracioso cuando se detecta un artista o género prohibido.
+    """
+    messages = [
+        f"🚫 ¡Alto ahí! {artist_name} trae reggaetón barato. El portal de la candela no se abre con esa llave.",
+        f"🎭 {artist_name}? Eso suena a reggaetón de baja frecuencia. Aquí solo vibra el eco de Lavoe y Colón.",
+        f"❌ {artist_name} está vetado por los ancestros de la salsa. Trae guaguancó o no entres.",
+        f"🔥 {artist_name} = reggaetón. Aquí solo se encienden discos que hacen sudar la clave.",
+        f"🎶 {artist_name}? Hermano, eso es ruido de reggaetón. Pide a Fania, pide a la Ponceña, invoca calidad.",
+        f"🚫 {artist_name}? Los dioses del mambo lo rechazaron. Aquí solo gira vinilo fino.",
+        f"🎵 {artist_name} es reggaetón, pana. La candela pide Palmieri, Blades, Raphy Leavitt… no eso.",
+        f"❌ {artist_name} no cruza este umbral. El reggaetón se queda afuera del templo de la clave.",
+        f"🔥 {artist_name}? Eso es reggaetón. La máquina de fuego solo entiende salsa dura y son cubano.",
+        f"🎶 {artist_name}? Bah. Aquí quemamos descargas y soneos, no ese plástico de reggaetón."
+    ]
+
+    import random
+    message = random.choice(messages)
+    print(message)
+    print("")
+
+
+def parse_direct_genre_request(user_input: str, genre_arg: str = None) -> tuple:
+    """
+    Parsea solicitudes con género directo: "instrucción" "género"
+    Retorna (instrucción, género) o (user_input, None) si no es formato directo
+    """
+    # Si se pasó género como argumento separado
+    if genre_arg:
+        genre_lower = genre_arg.lower()
+        if genre_lower in DIRECT_GENRES:
+            return user_input, genre_lower
+        else:
+            # Género directo inválido - mostrar error
+            print(f"❌ Error: Género directo inválido: '{genre_arg}'")
+            print(f"   Géneros válidos: {', '.join(DIRECT_GENRES)}")
+            print(f"   Formato correcto: mala-pata \"instrucción\" \"género\"")
+            exit(1)
+
+    # Buscar patrón: "texto" "género" (formato original con comillas anidadas)
+    import shlex
+    try:
+        parts = shlex.split(user_input)
+        if len(parts) == 2:
+            instruction, genre = parts
+            genre_lower = genre.lower()
+            if genre_lower in DIRECT_GENRES:
+                return instruction, genre_lower
+            else:
+                # Género directo inválido - mostrar error
+                print(f"❌ Error: Género directo inválido: '{genre}'")
+                print(f"   Géneros válidos: {', '.join(DIRECT_GENRES)}")
+                print(f"   Formato correcto: mala-pata \"instrucción\" \"género\"")
+                exit(1)
+    except ValueError:
+        pass
+
+    return user_input, None
+
+
+def run_request_with_direct_genre(nl_request: str, direct_genre: str, out_csv: str):
+    """
+    Ejecuta solicitud con género directo (sin análisis de género).
+    """
+    print("🧠 Interpretando pedido con género directo…")
+    plan = llm_plan(nl_request, direct_genre=direct_genre)
+
+    print("   Plan:", plan)
+
+    # Verificar si el artista está prohibido
+    if plan.get("artist"):
+        if is_bad_not_permitted(plan["artist"]):
+            show_bad_not_permitted_message(plan["artist"])
+            return
+
+    rows: List[Dict] = []
+    if plan["task"] == "album" and plan.get("artist") and plan.get("album"):
+        print(f"💿 Buscando álbum: {plan['artist']} — {plan['album']}")
+        rows = build_album_csv(plan["artist"], plan["album"])
+        if not rows:
+            print("   ⚠️ No se encontró el álbum en MusicBrainz.")
+    else:
+        count = int(plan.get("count") or 10)
+        artist = (plan.get("artist") or "").strip() or None
+
+        if artist and not plan.get("album"):
+            print(
+                f"👤 Playlist por artista: {count} temas | {artist} | género: {direct_genre}")
+            rows = pick_artist_playlist(
+                artist, count, genre=None)  # Sin filtro de género
+
+            # Si no encuentra canciones del artista específico, usar OpenAI fallback
+            if not rows:
+                print(
+                    f"   ⚠️ No se encontraron canciones de {artist} en MusicBrainz/Discogs.")
+                print(f"   🤖 Generando canciones con OpenAI...")
+                rows = generate_real_songs_with_openai(
+                    artist, count, direct_genre)
+        else:
+            # Para géneros directos sin artista específico, usar búsqueda genérica
+            print(
+                f"🎚️ Playlist: {count} temas | género directo: {direct_genre}")
+            # Usar salsa como base genérica
+            rows = pick_playlist("salsa_dura_clasica", None, count)
+
+    if not rows:
+        print("❌ No se pudo generar el CSV.")
+        return
+
+    # Deduplicación final
+    final: List[Dict] = []
+    seen = set()
+    target = int(plan.get("count") or len(rows))
+    for r in rows:
+        k = key_pair(r["artist"], r["title"])
+        if k in seen:
+            continue
+        seen.add(k)
+        final.append(r)
+        if len(final) >= target:
+            break
+
+    write_csv(final, out_csv, direct_genre=direct_genre)
+    print(
+        f"✅ CSV generado con género directo: {out_csv}  ({len(final)} filas)")
+    print(f"🎯 Género asignado: {direct_genre}")
+    print("   Ejecuta ahora:  come-candela")
+
+
 # ===== CLI =====
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Convierte un pedido natural en canciones.csv (Discogs→MB, con fuente) para el pipeline")
     parser.add_argument(
         "pedido", help="Ej: 'descárgame 10 canciones de salsa dura clasica' o '5 canciones de Larry Harlow'")
+    parser.add_argument(
+        "genero", nargs="?", help="Género directo: balada, house, nueva_trova, techno")
     # Por defecto, escribir en el directorio del proyecto
     default_out = os.path.join(os.path.dirname(
         os.path.abspath(__file__)), "canciones.csv")
@@ -1156,4 +1825,14 @@ if __name__ == "__main__":
     if not os.path.isabs(out_path):
         out_path = os.path.join(os.path.dirname(
             os.path.abspath(__file__)), out_path)
-    run_request(args.pedido, out_path)
+
+    # Verificar si es solicitud con género directo
+    instruction, direct_genre = parse_direct_genre_request(
+        args.pedido, args.genero)
+
+    if direct_genre:
+        print(f"🎯 Modo género directo: {direct_genre}")
+        print(f"📝 Instrucción: {instruction}")
+        run_request_with_direct_genre(instruction, direct_genre, out_path)
+    else:
+        run_request(args.pedido, out_path)

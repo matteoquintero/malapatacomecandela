@@ -35,13 +35,30 @@ from collections import defaultdict
 from typing import Dict, List, Optional
 
 # ========= .env =========
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 try:
     from dotenv import load_dotenv
-    PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
     load_dotenv(os.path.join(PROJECT_DIR, ".env"))
-    print("🧩 .env cargado (si existía).")
+
+    # Configurar modo debug
+    DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() in [
+        "true", "1", "yes", "on"]
+
+    def debug_print(*args, **kwargs):
+        """Función para imprimir mensajes de debug solo si DEBUG_MODE está activado."""
+        if DEBUG_MODE:
+            print(*args, **kwargs)
+
+    debug_print("🧩 .env cargado (si existía).")
 except Exception:
-    print("⚠️ No se pudo cargar python-dotenv (opcional).")
+    DEBUG_MODE = False
+
+    def debug_print(*args, **kwargs):
+        """Función de debug deshabilitada."""
+        pass
+
+    debug_print("⚠️ No se pudo cargar python-dotenv (opcional).")
 
 # ========= CONFIG =========
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
@@ -70,15 +87,17 @@ try:
     _OLD_MANIFEST = os.path.expanduser("~/.mala_pata/manifest.csv")
     if "MANIFEST_FILE" not in os.environ and os.path.exists(_OLD_MANIFEST):
         MANIFEST_FILE = _OLD_MANIFEST
-        print(f"ℹ️ Compat: usando manifest heredado {_OLD_MANIFEST}")
+        debug_print(f"ℹ️ Compat: usando manifest heredado {_OLD_MANIFEST}")
     _OLD_CH_CACHE = os.path.expanduser("~/.mala_pata/yt_channel_cache.json")
     if "CHANNEL_CACHE_FILE" not in os.environ and os.path.exists(_OLD_CH_CACHE):
         CHANNEL_CACHE_FILE = _OLD_CH_CACHE
-        print(f"ℹ️ Compat: usando cache canales heredado {_OLD_CH_CACHE}")
+        debug_print(
+            f"ℹ️ Compat: usando cache canales heredado {_OLD_CH_CACHE}")
     _OLD_SRCH_CACHE = os.path.expanduser("~/.mala_pata/yt_search_cache.json")
     if "SEARCH_CACHE_FILE" not in os.environ and os.path.exists(_OLD_SRCH_CACHE):
         SEARCH_CACHE_FILE = _OLD_SRCH_CACHE
-        print(f"ℹ️ Compat: usando cache búsquedas heredado {_OLD_SRCH_CACHE}")
+        debug_print(
+            f"ℹ️ Compat: usando cache búsquedas heredado {_OLD_SRCH_CACHE}")
 except Exception:
     pass
 
@@ -107,20 +126,24 @@ SEARCH_MODE = os.getenv("SEARCH_MODE", "no_api_first").strip().lower()
 NOAPI_SOURCES = [s.strip() for s in os.getenv(
     "NOAPI_SOURCES", "ytsearch,ytmusicsearch,scsearch").split(",") if s.strip()]
 YTDLP_BIN = os.getenv("YTDLP_BIN", "yt-dlp")
+# Deshabilitar fallback a API completamente
+DISABLE_API_FALLBACK = os.getenv("DISABLE_API_FALLBACK", "false").lower() in [
+    "true", "1", "yes", "on"]
 
-print("⚙️ Config:")
-print(f"   DL_SCRIPT      = {DL_SCRIPT}")
-print(f"   LIB_BASE_DIR   = {LIB_BASE_DIR}")
-print(f"   MANIFEST_FILE  = {MANIFEST_FILE}")
-print(f"   OPENAI_MODEL   = {OPENAI_MODEL}")
-print(
+debug_print("⚙️ Config:")
+debug_print(f"   DL_SCRIPT      = {DL_SCRIPT}")
+debug_print(f"   LIB_BASE_DIR   = {LIB_BASE_DIR}")
+debug_print(f"   MANIFEST_FILE  = {MANIFEST_FILE}")
+debug_print(f"   OPENAI_MODEL   = {OPENAI_MODEL}")
+debug_print(
     f"   CHANNEL_CACHE  = {CHANNEL_CACHE_FILE} (TTL {CHANNEL_CACHE_TTL_DAYS}d)")
-print(
+debug_print(
     f"   SEARCH_CACHE   = {SEARCH_CACHE_FILE} (TTL {SEARCH_CACHE_TTL_DAYS}d)")
-print(f"   YT BUDGET      = {YOUTUBE_CALL_BUDGET} unidades")
-print(f"   SEARCH_MODE    = {SEARCH_MODE}")
-print(f"   NOAPI_SOURCES  = {NOAPI_SOURCES}")
-print(f"   YTDLP_BIN      = {YTDLP_BIN}")
+debug_print(f"   YT BUDGET      = {YOUTUBE_CALL_BUDGET} unidades")
+debug_print(f"   SEARCH_MODE    = {SEARCH_MODE}")
+debug_print(f"   NOAPI_SOURCES  = {NOAPI_SOURCES}")
+debug_print(f"   YTDLP_BIN      = {YTDLP_BIN}")
+debug_print(f"   DISABLE_API_FALLBACK = {DISABLE_API_FALLBACK}")
 
 # ========= OpenAI (opcional) =========
 _openai_client = None
@@ -128,9 +151,9 @@ if OPENAI_API_KEY:
     try:
         from openai import OpenAI
         _openai_client = OpenAI(api_key=OPENAI_API_KEY)
-        print("🤖 OpenAI: OK (API key detectada)")
+        debug_print("🤖 OpenAI: OK (API key detectada)")
     except Exception as e:
-        print(f"⚠️ OpenAI no disponible: {e}")
+        debug_print(f"⚠️ OpenAI no disponible: {e}")
 
 # ========= YouTube API =========
 _youtube = None
@@ -138,11 +161,11 @@ if YOUTUBE_API_KEY:
     try:
         from googleapiclient.discovery import build
         _youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
-        print("📺 YouTube API: OK (API key detectada)")
+        debug_print("📺 YouTube API: OK (API key detectada)")
     except Exception as e:
-        print(f"⚠️ YouTube API no disponible: {e}")
+        debug_print(f"⚠️ YouTube API no disponible: {e}")
 else:
-    print("📺 YouTube API: SIN API key")
+    debug_print("📺 YouTube API: SIN API key")
 
 # ========= Helpers: cuota/budget =========
 
@@ -218,6 +241,11 @@ GENRE_COMMAND: Dict[str, str] = {
     "salsa_romantica": "dl-salsa-romantica",
     "timba": "dl-timba",
     "salsa_dura_revival": "dl-salsa-dura-revival",
+    # Géneros directos
+    "balada": "dl-balada",
+    "house": "dl-house",
+    "nueva_trova": "dl-nueva-trova",
+    "techno": "dl-techno",
 }
 ALL_SLUGS: List[str] = list(GENRE_COMMAND.keys())
 
@@ -365,11 +393,11 @@ def _load_genres_reference():
         try:
             with open(GENRE_REF_PATH, "r", encoding="utf-8") as f:
                 _genres_reference_text = f.read()
-                print(
+                debug_print(
                     f"📚 Referencia de géneros cargada desde {GENRE_REF_PATH} ({len(_genres_reference_text)} chars).")
                 return
         except Exception as e:
-            print(f"⚠️ No se pudo leer GENRE_REF_PATH: {e}")
+            debug_print(f"⚠️ No se pudo leer GENRE_REF_PATH: {e}")
 
     # Fallback: derivar una referencia compacta desde GENRE_DB
     try:
@@ -385,10 +413,10 @@ def _load_genres_reference():
             })
         _genres_reference_text = json.dumps(
             {"genres": ref}, ensure_ascii=False, indent=2)
-        print(
+        debug_print(
             f"📚 Referencia de géneros derivada de GENRE_DB ({len(_genres_reference_text)} chars).")
     except Exception as e:
-        print(f"⚠️ No se pudo construir referencia de géneros: {e}")
+        debug_print(f"⚠️ No se pudo construir referencia de géneros: {e}")
         _genres_reference_text = ""
 
 
@@ -498,7 +526,7 @@ def llm_call(meta: Dict) -> Dict:
 def classify(meta: Dict) -> Dict:
     use_heur_gate = (CLASSIFIER_MODE != "LLM_ONLY")
 
-    print("   🤖 Clasificando (heurística)...")
+    debug_print("   🤖 Clasificando (heurística)...")
     hres = heuristic_scores(meta)
     top = hres[:5]
     raw_scores = [x.score for x in top]
@@ -992,41 +1020,141 @@ def yt_dlp_search(query: str, max_results: int = 5, source: str = "ytsearch") ->
     """
     if not _yt_dlp_available():
         return []
+
+    # Estrategia 1: Intentar con --print (método original)
     try:
-        # Usamos --print con plantilla para obtener id|title|uploader en líneas separadas
         template = "%(id)s|||%(title)s|||%(uploader)s"
         cmd = [
             YTDLP_BIN, f"{source}{max_results}:{query}",
             "--skip-download",
             "--print", template
         ]
-        out = subprocess.run(cmd, capture_output=True,
-                             text=True, check=True).stdout.strip().splitlines()
-        items = []
-        for line in out:
-            parts = line.split("|||")
-            if len(parts) >= 3:
-                vid = parts[0].strip()
-                title = parts[1].strip()
-                uploader = parts[2].strip()
-                if re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
-                    items.append({
-                        "video_id": vid,
-                        "title": title,
-                        "channel": uploader,
-                        "channel_id": "",            # no disponible sin API
-                        "description": "",           # no disponible sin API
-                        "channel_title_full": uploader,
-                        "channel_desc": "",
-                        "channel_subs": 0,           # desconocido
-                        "_rank": len(items) + 1,
-                        "_noapi": True
-                    })
-        print(f"   🔍 {source} resultados (no API): {len(items)}")
-        return items[:max_results]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        # Si el comando fue exitoso, procesar normalmente
+        if result.returncode == 0:
+            items = _parse_yt_dlp_output(result.stdout, max_results)
+            print(f"   🔍 {source} resultados (no API): {len(items)}")
+            return items
+
+        # Si falló pero hay stdout, intentar extraer información de los errores
+        debug_print(
+            f"   ⚠️ {source} falló con código {result.returncode}, intentando extraer IDs de stderr...")
+
+        # Estrategia 2: Extraer video IDs de los mensajes de error
+        video_ids = _extract_video_ids_from_error(result.stderr)
+        if video_ids:
+            debug_print(
+                f"   🔍 Encontrados {len(video_ids)} video IDs en errores: {video_ids}")
+            items = _create_items_from_ids(video_ids, max_results)
+            print(
+                f"   🔍 {source} resultados (extraídos de errores): {len(items)}")
+            return items
+
+        # Estrategia 3: Intentar con --list-formats para obtener metadatos básicos
+        debug_print(f"   🔄 Intentando con --list-formats para {source}...")
+        items = _try_list_formats_search(query, max_results, source)
+        if items:
+            print(f"   🔍 {source} resultados (list-formats): {len(items)}")
+            return items
+
     except Exception as e:
-        print(f"   ℹ️ yt-dlp search error ({source}): {e}")
-        return []
+        debug_print(f"   ❌ Error en {source}: {e}")
+
+    print(
+        f"   ℹ️ yt-dlp search error ({source}): No se pudieron obtener resultados")
+    return []
+
+
+def _parse_yt_dlp_output(stdout: str, max_results: int) -> List[Dict]:
+    """Parsea la salida estándar de yt-dlp con formato id|||title|||uploader"""
+    items = []
+    for line in stdout.strip().splitlines():
+        parts = line.split("|||")
+        if len(parts) >= 3:
+            vid = parts[0].strip()
+            title = parts[1].strip()
+            uploader = parts[2].strip()
+            if re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
+                items.append({
+                    "video_id": vid,
+                    "title": title,
+                    "channel": uploader,
+                    "channel_id": "",
+                    "description": "",
+                    "channel_title_full": uploader,
+                    "channel_desc": "",
+                    "channel_subs": 0,
+                    "_rank": len(items) + 1,
+                    "_noapi": True
+                })
+    return items[:max_results]
+
+
+def _extract_video_ids_from_error(stderr: str) -> List[str]:
+    """Extrae video IDs de los mensajes de error de yt-dlp"""
+    video_ids = []
+    # Buscar patrones como [youtube] VIDEO_ID: en los errores
+    import re
+    pattern = r'\[youtube\]\s+([A-Za-z0-9_-]{11}):'
+    matches = re.findall(pattern, stderr)
+    for match in matches:
+        if match not in video_ids:
+            video_ids.append(match)
+    return video_ids
+
+
+def _create_items_from_ids(video_ids: List[str], max_results: int) -> List[Dict]:
+    """Crea items básicos a partir de video IDs extraídos de errores"""
+    items = []
+    for i, vid in enumerate(video_ids[:max_results]):
+        items.append({
+            "video_id": vid,
+            "title": f"Video {vid}",  # Título genérico
+            "channel": "Unknown",     # Canal desconocido
+            "channel_id": "",
+            "description": "",
+            "channel_title_full": "Unknown",
+            "channel_desc": "",
+            "channel_subs": 0,
+            "_rank": i + 1,
+            "_noapi": True
+        })
+    return items
+
+
+def _try_list_formats_search(query: str, max_results: int, source: str) -> List[Dict]:
+    """Intenta obtener información usando --list-formats"""
+    try:
+        cmd = [
+            YTDLP_BIN, f"{source}{max_results}:{query}",
+            "--list-formats",
+            "--no-download"
+        ]
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=30)
+
+        if result.returncode == 0:
+            # Extraer video IDs de la salida de --list-formats
+            video_ids = _extract_video_ids_from_list_formats(result.stdout)
+            if video_ids:
+                return _create_items_from_ids(video_ids, max_results)
+    except Exception as e:
+        debug_print(f"   ❌ Error en list-formats: {e}")
+    return []
+
+
+def _extract_video_ids_from_list_formats(stdout: str) -> List[str]:
+    """Extrae video IDs de la salida de --list-formats"""
+    video_ids = []
+    import re
+    # Buscar patrones de video IDs en la salida
+    pattern = r'([A-Za-z0-9_-]{11})'
+    matches = re.findall(pattern, stdout)
+    for match in matches:
+        if match not in video_ids and len(match) == 11:
+            video_ids.append(match)
+    return video_ids
 
 
 def find_candidates_noapi(artist: str, title: str, max_results: int = 5) -> List[Dict]:
@@ -1034,21 +1162,51 @@ def find_candidates_noapi(artist: str, title: str, max_results: int = 5) -> List
     query = f"{artist} {title}"
     all_items: List[Dict] = []
     tried = []
+    debug_print(f"   🔍 Búsqueda NO_API: '{query}'")
+
     for src in NOAPI_SOURCES:
         src = src.lower()
         if src not in ("ytsearch", "ytmusicsearch", "scsearch"):
+            debug_print(f"   ⚠️ Fuente no válida: {src}")
             continue
         tried.append(src)
+        debug_print(f"   🔎 Probando fuente: {src}")
+
         items = yt_dlp_search(query, max_results=max_results, source=src)
-        # normalizar títulos para filtrar un poco por similitud
-        items = [it for it in items if _title_similarity(
-            title, it["title"]) >= 0.45]
+        debug_print(f"   📊 {src} devolvió {len(items)} items")
+
         if items:
-            all_items.extend(items)
+            # Mostrar algunos títulos para debug
+            for i, item in enumerate(items[:3]):
+                debug_print(f"     {i+1}. {item.get('title', 'Sin título')}")
+
+        # normalizar títulos para filtrar un poco por similitud (relajar el filtro)
+        filtered_items = []
+        for it in items:
+            similarity = _title_similarity(title, it["title"])
+            if similarity >= 0.35:  # Relajado de 0.45 a 0.35
+                filtered_items.append(it)
+                debug_print(
+                    f"     ✅ Título aceptado (sim: {similarity:.2f}): {it.get('title', 'Sin título')}")
+            else:
+                debug_print(
+                    f"     ❌ Título rechazado (sim: {similarity:.2f}): {it.get('title', 'Sin título')}")
+
+        if filtered_items:
+            all_items.extend(filtered_items)
+            debug_print(
+                f"   ✅ {src} exitoso: {len(filtered_items)} items válidos")
             break  # nos quedamos con la primera fuente que devolvió algo
+        else:
+            debug_print(f"   ❌ {src} sin items válidos después del filtro")
+
     if tried:
         print(
             f"   🔎 no_api fuentes probadas: {tried} -> {len(all_items)} items")
+        if not all_items:
+            debug_print(
+                "   ⚠️ Ninguna fuente NO_API devolvió resultados válidos")
+
     return all_items[:max_results]
 
 
@@ -1280,10 +1438,11 @@ def run_download(video_id: str, artist: str, title: str, slug: str, image_type: 
     artist = title_case_keep_caps(artist)
     title = title_case_keep_caps(title)
     command = GENRE_COMMAND[slug]
-    cmd = f'source {shlex.quote(DL_SCRIPT)} && {command} "{video_id}" "{artist}" "{title}" {image_type}'
+    # Ejecutar el script cargando las funciones primero
+    cmd = f'export __MPCC_FROM_PIPELINE=1 && source {shlex.quote(DL_SCRIPT)} && {command} "{video_id}" "{artist}" "{title}" {image_type}'
     print(
         f"   ⬇️ Ejecutando: {command} {video_id} … artist: {artist} title: {title}")
-    return subprocess.run(["bash", "-lc", cmd], capture_output=True, text=True)
+    return subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
 
 # ========= Proceso CSV =========
 
@@ -1400,7 +1559,7 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
 
                     elif SEARCH_MODE == "api_first":
                         print("   🌐 Modo búsqueda: API_FIRST")
-                        if _budget_left() > 0:
+                        if not DISABLE_API_FALLBACK and _budget_left() > 0:
                             cands = _try_api()
                         if not cands:
                             print("   ↪️ Fallback a NO_API...")
@@ -1411,12 +1570,20 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                         print("   🌐 Modo búsqueda: NO_API_FIRST")
                         cands = _try_noapi()
                         if not cands:
-                            if _budget_left() > 0:
+                            # Solo hacer fallback a API si realmente queremos usar la API
+                            if not DISABLE_API_FALLBACK and YOUTUBE_API_KEY and _budget_left() > 0:
                                 print("   ↪️ Fallback a API...")
                                 cands = _try_api()
                             else:
-                                print(
-                                    "   ⛔ Sin resultados NO_API y presupuesto API agotado.")
+                                if DISABLE_API_FALLBACK:
+                                    print(
+                                        "   ⛔ Sin resultados NO_API y fallback a API deshabilitado.")
+                                elif not YOUTUBE_API_KEY:
+                                    print(
+                                        "   ⛔ Sin resultados NO_API y sin API key configurada.")
+                                else:
+                                    print(
+                                        "   ⛔ Sin resultados NO_API y presupuesto API agotado.")
                                 cands = []
 
                     best = choose_best_candidate(cands, artist, title)
@@ -1439,9 +1606,33 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                 print(
                     f"   💳 Cuota gastada en esta pista (antes de clasif/descarga): {per_track['quota_units']}u | llamadas: {per_track['api_calls']}")
 
-                # Clasificar
-                cls = classify(best_meta)
-                print(f"   🎯 Género: {cls['slug']} ({cls['confidence']})")
+                # Verificar si hay género directo
+                direct_genre = (row.get("gnere") or "").strip()
+                if direct_genre:
+                    print(
+                        f"   🎯 Género directo: {direct_genre} (sin análisis)")
+                    # Mapear género directo a comando
+                    genre_to_command = {
+                        "balada": "dl-balada",
+                        "house": "dl-house",
+                        "nueva_trova": "dl-nueva-trova",
+                        "techno": "dl-techno"
+                    }
+                    if direct_genre not in genre_to_command:
+                        print(f"   ❌ Género directo no válido: {direct_genre}")
+                        skipped += 1
+                        continue
+
+                    cls = {
+                        "slug": direct_genre,
+                        "confidence": 1.0,
+                        "rationale": f"Género directo: {direct_genre}",
+                        "command": genre_to_command[direct_genre]
+                    }
+                else:
+                    # Clasificar normalmente
+                    cls = classify(best_meta)
+                    print(f"   🎯 Género: {cls['slug']} ({cls['confidence']})")
 
                 # Descargar
                 status, stdout_tail, stderr_tail, filepath_hint = "skipped(dryrun)", "", "", ""
@@ -1463,6 +1654,16 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                                 f"      which yt-dlp = {_sh.which('yt-dlp')}")
                             print(
                                 f"      which ffmpeg = {_sh.which('ffmpeg')}")
+
+                            # Check yt-dlp version
+                            try:
+                                ytdlp_version = subprocess.run(["yt-dlp", "--version"],
+                                                               capture_output=True, text=True, timeout=10)
+                                print(
+                                    f"      yt-dlp version = {ytdlp_version.stdout.strip() if ytdlp_version.returncode == 0 else 'ERROR'}")
+                            except Exception:
+                                print("      yt-dlp version = NO DISPONIBLE")
+
                             # Verificar que la función bash exista tras source
                             cmd_name = cls.get("command", "")
                             check = subprocess.run([

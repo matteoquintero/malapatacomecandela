@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # Idempotent guard: evita imprimir/definir todo dos veces si se fuentea de nuevo
-if [ -n "${__MPCC_DL_MUSIC_LOADED:-}" ]; then
+# Solo aplicar el guard si no estamos siendo ejecutados desde pipeline_music.py
+if [ -n "${__MPCC_DL_MUSIC_LOADED:-}" ] && [ -z "${__MPCC_FROM_PIPELINE:-}" ]; then
   return 0 2>/dev/null || true
 fi
 export __MPCC_DL_MUSIC_LOADED=1
@@ -45,6 +46,29 @@ dl_music() {
         echo "📍 Ejemplo: $GENERO \"atVS36nBgDw\" \"Héctor Lavoe\" \"El Cantante\" hq"
         echo "💡 Solo necesitas el ID del video, no la URL completa"
         echo "🖼️  Tipos de imagen: 'hq' (default) o 'max' (mejor calidad)"
+        return 1
+    fi
+
+    # Check if yt-dlp is up to date and working
+    if command -v yt-dlp >/dev/null 2>&1; then
+        echo "🔄 Verificando versión de yt-dlp..."
+        YTDLP_VERSION=$(yt-dlp --version 2>/dev/null)
+        if [ $? -eq 0 ]; then
+            echo "   Versión actual: $YTDLP_VERSION"
+            # Check if it's a recent version (basic check)
+            if echo "$YTDLP_VERSION" | grep -q "2024\|2025"; then
+                echo "   ✅ Versión parece actualizada"
+            else
+                echo "   ⚠️  Versión puede estar desactualizada"
+                echo "   💡 Considera actualizar: pip install --upgrade yt-dlp"
+            fi
+        else
+            echo "   ❌ yt-dlp no responde correctamente"
+            echo "   💡 Reinstala: pip install --upgrade yt-dlp"
+        fi
+    else
+        echo "❌ yt-dlp no está instalado o no está en PATH"
+        echo "💡 Instala con: pip install yt-dlp"
         return 1
     fi
 
@@ -122,7 +146,32 @@ dl_music() {
 
     echo ""
 
-    if yt-dlp -x --audio-format mp3 -o "$FULL_PATH" "$URL"; then
+    # Try multiple format strategies to handle SABR streaming and format availability issues
+    # Strategy 1: Standard extraction with audio quality 0
+    if yt-dlp -x --audio-format mp3 --audio-quality 0 -o "$FULL_PATH" "$URL" 2>/dev/null; then
+        echo "✅ Descarga exitosa con método estándar"
+    # Strategy 2: Try with specific audio formats for SABR streaming
+    elif yt-dlp -x --audio-format mp3 --audio-quality 0 --format "bestaudio[ext=m4a]/bestaudio/best" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+        echo "✅ Descarga exitosa con formato m4a/best"
+    # Strategy 3: Try with bestaudio only
+    elif yt-dlp -x --audio-format mp3 --audio-quality 0 --format "bestaudio" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+        echo "✅ Descarga exitosa con bestaudio"
+    # Strategy 4: Try with worst quality (most compatible)
+    elif yt-dlp -x --audio-format mp3 --audio-quality 0 --format "worst" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+        echo "✅ Descarga exitosa con calidad mínima"
+    # Strategy 5: Try with SABR streaming workaround (no format selection)
+    elif yt-dlp -x --audio-format mp3 --audio-quality 0 --extractor-args "youtube:formats=missing_pot" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+        echo "✅ Descarga exitosa con workaround SABR"
+    # Strategy 6: Last resort - try without format restrictions
+    elif yt-dlp -x --audio-format mp3 --audio-quality 0 --extractor-args "youtube:formats=missing_pot" --format "best" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+        echo "✅ Descarga exitosa con formato best y SABR workaround"
+    else
+        # All strategies failed
+        echo "❌ Todas las estrategias de descarga fallaron"
+        false
+    fi
+
+    if [ $? -eq 0 ]; then
         echo ""
         echo "✅ Descarga completada!"
         echo "📄 Archivo: $FILENAME"
@@ -181,6 +230,33 @@ dl_music() {
         return 0
     else
         echo "❌ Error en la descarga"
+        echo "🔍 Intentando diagnóstico del error..."
+
+        # Check if this is a SABR streaming issue
+        echo "🔍 Verificando si es un problema de SABR streaming..."
+        if yt-dlp --list-formats "$URL" 2>&1 | grep -q "SABR streaming\|missing_pot\|GVS PO Token"; then
+            echo "⚠️  Detectado problema de SABR streaming de YouTube"
+            echo "   YouTube ha implementado un nuevo protocolo de streaming que puede causar problemas"
+        fi
+
+        # Try to get more information about available formats
+        echo "📋 Formatos disponibles para el video:"
+        yt-dlp --list-formats "$URL" 2>/dev/null | head -20 || echo "   No se pudieron obtener formatos"
+
+        echo ""
+        echo "💡 Sugerencias para resolver el problema:"
+        echo "   1. Actualiza yt-dlp a la versión más reciente:"
+        echo "      pip install --upgrade yt-dlp"
+        echo "      o para nightly: pip install --upgrade yt-dlp-nightly"
+        echo ""
+        echo "   2. Si es un problema de SABR streaming:"
+        echo "      - YouTube ha cambiado su protocolo de streaming"
+        echo "      - Algunos videos pueden no estar disponibles temporalmente"
+        echo "      - Intenta con otro video ID"
+        echo ""
+        echo "   3. Verifica que el video sea público y esté disponible"
+        echo "   4. Si el problema persiste, puede ser una restricción regional"
+
         return 1
     fi
 }
@@ -215,6 +291,7 @@ print_block_1() {
   echo "✨ Cómo funciona el conjuro:"
   echo "  1) 🔮 Crea el listado:"
   echo "       · mala-pata \"10 de boogaloo underground\""
+  echo "       · mala-pata \"3 canciones de Silvio Rodríguez\" \"nueva_trova\""
   echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX'"
   echo ""
   echo "  2) 🔥 Enciende la llama → come-candela"
@@ -230,6 +307,7 @@ print_block_2() {
   echo "🔮 El ritual del fuego:"
   echo "  1) ✨ Invoca tu lista:"
   echo "       · mala-pata \"20 guarachas picarescas\""
+  echo "       · mala-pata \"2 canciones de Kraftwerk\" \"techno\""
   echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX'"
   echo ""
   echo "  2) 🔥 Alimenta la llama → come-candela"
@@ -245,6 +323,7 @@ print_block_3() {
   echo "🤖 Protocolo de extracción sonora:"
   echo "  1) 📡 Genera el manifiesto de tracks:"
   echo "       · mala-pata \"15 joyas de salsa dura\""
+  echo "       · mala-pata \"4 canciones de Daft Punk\" \"house\""
   echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX'"
   echo ""
   echo "  2) ⚙️ Ejecuta el motor → come-candela"
@@ -260,6 +339,7 @@ print_block_4() {
   echo "🪄 Hechizo musical en 3 pasos:"
   echo "  1) ✏️ Escribe tu deseo:"
   echo "       · mala-pata \"5 timbas que revienten\""
+  echo "       · mala-pata \"1 cancion de Leo Dan\" \"balada\""
   echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX'"
   echo ""
   echo "  2) 🔥 Prende la candela → come-candela"

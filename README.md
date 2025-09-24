@@ -101,6 +101,51 @@ python delete_song.py --artist "NG La Banda" --title "Santa Palabra"
 - Si el manifest no existe, se crea automáticamente en `<proyecto>/manifest.csv` (puedes cambiarlo con `MANIFEST_FILE`).
 - Discogs y MusicBrainz tienen límites; el código respeta pausas para ser amable.
 
+### Problemas de SABR streaming (YouTube)
+
+Si encuentras errores como "Requested format is not available" o "Only images are available for download":
+
+1. **Diagnosticar el problema:**
+
+   ```bash
+   ./test_sabr_streaming.sh VIDEO_ID
+   ```
+
+2. **Actualizar yt-dlp:**
+
+   ```bash
+   pip install --upgrade yt-dlp
+   # o para versión nightly:
+   pip install --upgrade yt-dlp-nightly
+   ```
+
+3. **El sistema ahora incluye múltiples estrategias de descarga** para manejar automáticamente los problemas de SABR streaming.
+
+4. **Para más información:** [GitHub issue #12482](https://github.com/yt-dlp/yt-dlp/issues/12482)
+
+### Evitar gastar cuota de YouTube API
+
+Si quieres usar SOLO métodos sin API (yt-dlp) y evitar gastar cuota:
+
+1. **Configuración rápida:**
+
+   ```bash
+   ./configure_no_api.sh
+   ```
+
+2. **Configuración manual en .env:**
+
+   ```bash
+   SEARCH_MODE=no_api_only
+   DISABLE_API_FALLBACK=true
+   #YOUTUBE_API_KEY=  # Comentar esta línea
+   ```
+
+3. **Con debug activado para ver qué está pasando:**
+   ```bash
+   DEBUG_MODE=true python pipeline_music.py --input canciones.csv
+   ```
+
 ## Desarrollo
 
 - Formato CSV esperado por el pipeline: columnas `artist,title,query_override,source`.
