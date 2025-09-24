@@ -1,0 +1,100 @@
+# Archivos de configuración sensibles
+.env
+*.env
+.env.local
+.env.production
+
+# Entorno virtual de Python
+.venv/
+venv/
+env/
+ENV/
+
+# Archivos de caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Archivos de caché del sistema
+cache/
+*.cache
+.cache/
+
+# Logs y archivos temporales
+out/
+logs/
+*.log
+*.tmp
+*.temp
+
+# Archivos de música (opcional - descomenta si no quieres subir música)
+# *.mp3
+# *.wav
+# *.flac
+# *.m4a
+
+# Archivos de sistema
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs y editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Archivos de backup
+*.backup
+*.bak
+*.old
+
+# Archivos de configuración local
+config.local.*
+settings.local.*
+
+# Archivos de Spotify (tokens de acceso)
+spotify_token_cache
+*.spotify_cache
+
+# Archivos de YouTube (cachés)
+yt_channel_cache.json
+yt_search_cache.json
+
+# Archivos de manifest (opcional - descomenta si no quieres versionar el manifest)
+# manifest.csv
+
+# Archivos de requirements congelados
+requirements-freeze.txt
+
+# Archivos de test
+test_*.py
+*_test.py
+tests/
+
+# Archivos de documentación generados
+docs/_build/
+site/

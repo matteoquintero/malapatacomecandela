@@ -1,0 +1,12 @@
+# Dependencias principales
+python-dotenv>=1.0.1
+requests>=2.31.0
+openai>=1.30.0
+discogs-client>=2.3.0
+
+# YouTube / Google APIs
+google-api-python-client>=2.132.0
+yt-dlp>=2024.8.6
+
+# Spotify
+spotipy>=2.23.0
