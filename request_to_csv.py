@@ -1097,7 +1097,7 @@ def search_real_songs_spotify(artist: str, count: int, genre: Optional[str] = No
     Busca canciones reales del artista en Spotify.
     """
     if not _spotify:
-        print("⚠️ Spotify no disponible")
+        debug_print("⚠️ Spotify no disponible")
         return []
 
     try:
@@ -1118,7 +1118,7 @@ def search_real_songs_spotify(artist: str, count: int, genre: Optional[str] = No
         debug_print(f"[DBG] Spotify returned {len(tracks)} tracks")
 
         if not tracks:
-            print(f"🔍 Spotify no encontró canciones de {artist}")
+            debug_print(f"🔍 Spotify no encontró canciones de {artist}")
             return []
 
         # Filtrar por artista exacto y crear lista
@@ -1226,11 +1226,12 @@ def search_real_songs_spotify(artist: str, count: int, genre: Optional[str] = No
 
         debug_print(
             f"[DBG] Spotify filtering summary: {len(tracks)} total tracks, {filtered_count} filtered out, {len(rows)} final matches")
-        print(f"🎵 Spotify encontró {len(rows)} canciones reales de {artist}")
+        debug_print(
+            f"🎵 Spotify encontró {len(rows)} canciones reales de {artist}")
         return rows
 
     except Exception as e:
-        print(f"⚠️ Error buscando en Spotify: {e}")
+        debug_print(f"⚠️ Error buscando en Spotify: {e}")
         return []
 
 
@@ -1275,17 +1276,17 @@ Canción 3"""
 
             # Verificar si OpenAI no conoce al artista
             if "NO_CONOZCO" in titles_text.upper() or "NO CONOZCO" in titles_text.upper():
-                print(f"🤖 OpenAI no conoce canciones reales de {artist}")
+                debug_print(f"🤖 OpenAI no conoce canciones reales de {artist}")
                 return []
 
             titles = [title.strip() for title in titles_text.split('\n') if title.strip(
             ) and not title.strip().startswith(('1.', '2.', '3.', '4.', '5.'))]
 
-            print(
+            debug_print(
                 f"🤖 OpenAI encontró {len(titles)} canciones reales de {artist}")
         else:
             # Fallback: generador básico sin OpenAI
-            print("⚠️ OpenAI no disponible, usando generador básico")
+            debug_print("⚠️ OpenAI no disponible, usando generador básico")
             titles = generate_basic_fictional_titles(artist, count, genre)
 
         # Crear lista de canciones reales
@@ -1307,9 +1308,9 @@ Canción 3"""
         return rows
 
     except Exception as e:
-        print(f"⚠️ Error generando canciones: {e}")
+        debug_print(f"⚠️ Error generando canciones: {e}")
         # Fallback final: generador básico
-        print("🔄 Usando generador básico como fallback")
+        debug_print("🔄 Usando generador básico como fallback")
         titles = generate_basic_fictional_titles(artist, count, genre)
         rows = []
         for title in titles[:count]:
@@ -1523,7 +1524,7 @@ def write_csv(rows: List[Dict], path: str, direct_genre: str = None):
 
 
 def run_request(nl_request: str, out_csv: str):
-    print("🧠 Interpretando pedido…")
+    print("🔮 Los oráculos interpretan tu pedido…")
     plan = llm_plan(nl_request)
 
     # Si es playlist y no trae substyle, sesgo por defecto (como tenías)
@@ -1531,7 +1532,7 @@ def run_request(nl_request: str, out_csv: str):
         g = (plan.get("genre") or "").lower()
         plan["substyle"] = "underground" if "salsa_dura_clasica" in g else None
 
-    print("   Plan:", plan)
+    debug_print("   Plan:", plan)
 
     # Verificar si el artista está prohibido
     if plan.get("artist"):
@@ -1541,10 +1542,11 @@ def run_request(nl_request: str, out_csv: str):
 
     rows: List[Dict] = []
     if plan["task"] == "album" and plan.get("artist") and plan.get("album"):
-        print(f"💿 Buscando álbum: {plan['artist']} — {plan['album']}")
+        print(
+            f"📜 Buscando en los archivos: {plan['artist']} — {plan['album']}")
         rows = build_album_csv(plan["artist"], plan["album"])
         if not rows:
-            print("   ⚠️ No se encontró el álbum en MusicBrainz.")
+            print("   ⚠️ El pergamino está vacío")
     else:
         count = int(plan.get("count") or 10)
         artist = (plan.get("artist") or "").strip() or None
@@ -1553,13 +1555,16 @@ def run_request(nl_request: str, out_csv: str):
 
         if artist and not plan.get("album"):
             # *** NUEVO: modo artista ***
+            print(f"🎭 El bardo {artist} ha sido convocado.")
             print(
-                f"👤 Playlist por artista: {count} temas | {artist} | género filtro: {genre or '—'}")
+                f"   ✨ Visión revelada: {count} invocaciones | Artista: {artist} | Género: — | Estilo: libre")
             rows = pick_artist_playlist(artist, count, genre=genre)
         else:
             # modo por género (el de siempre)
             g = (genre or "salsa_dura_clasica").lower()
-            print(f"🎚️ Playlist: {count} temas | {g} | {substyle or 'mixto'}")
+            print(f"🎶 El espíritu del playlist ha sido invocado.")
+            print(
+                f"   ✨ Visión revelada: {count} invocaciones | Género: {g} | Estilo: libre")
             rows = pick_playlist(g, substyle, count)
         try:
             debug_print(f"[DBG] run_request: rows_before_final={len(rows)}")
@@ -1610,8 +1615,10 @@ def run_request(nl_request: str, out_csv: str):
             break
 
     write_csv(final, out_csv)
-    print(f"✅ CSV generado: {out_csv}  ({len(final)} filas)")
-    print("   Ejecuta ahora:  come-candela")
+    print(
+        f"📜 El grimorio quedó grabado en: {os.path.basename(out_csv)}  ({len(final)} sello{'s' if len(final) != 1 else ''} inscrito{'s' if len(final) != 1 else ''})")
+    print("")
+    print("🔥 Para desatar la llama, pronuncia: come-candela")
 
 
 # ===== Géneros Directos =====
@@ -1741,10 +1748,10 @@ def run_request_with_direct_genre(nl_request: str, direct_genre: str, out_csv: s
     """
     Ejecuta solicitud con género directo (sin análisis de género).
     """
-    print("🧠 Interpretando pedido con género directo…")
+    print("🔮 Los oráculos interpretan tu pedido con bendición directa…")
     plan = llm_plan(nl_request, direct_genre=direct_genre)
 
-    print("   Plan:", plan)
+    debug_print("   Plan:", plan)
 
     # Verificar si el artista está prohibido
     if plan.get("artist"):
@@ -1754,10 +1761,11 @@ def run_request_with_direct_genre(nl_request: str, direct_genre: str, out_csv: s
 
     rows: List[Dict] = []
     if plan["task"] == "album" and plan.get("artist") and plan.get("album"):
-        print(f"💿 Buscando álbum: {plan['artist']} — {plan['album']}")
+        print(
+            f"📜 Buscando en los archivos: {plan['artist']} — {plan['album']}")
         rows = build_album_csv(plan["artist"], plan["album"])
         if not rows:
-            print("   ⚠️ No se encontró el álbum en MusicBrainz.")
+            print("   ⚠️ El pergamino está vacío")
     else:
         count = int(plan.get("count") or 10)
         artist = (plan.get("artist") or "").strip() or None
@@ -1801,9 +1809,10 @@ def run_request_with_direct_genre(nl_request: str, direct_genre: str, out_csv: s
 
     write_csv(final, out_csv, direct_genre=direct_genre)
     print(
-        f"✅ CSV generado con género directo: {out_csv}  ({len(final)} filas)")
-    print(f"🎯 Género asignado: {direct_genre}")
-    print("   Ejecuta ahora:  come-candela")
+        f"📜 El grimorio quedó grabado en: {os.path.basename(out_csv)}  ({len(final)} sello{'s' if len(final) != 1 else ''} inscrito{'s' if len(final) != 1 else ''})")
+    print(f"🎯 Género bendecido: {direct_genre}")
+    print("")
+    print("🔥 Para desatar la llama, pronuncia: come-candela")
 
 
 # ===== CLI =====
@@ -1831,8 +1840,8 @@ if __name__ == "__main__":
         args.pedido, args.genero)
 
     if direct_genre:
-        print(f"🎯 Modo género directo: {direct_genre}")
-        print(f"📝 Instrucción: {instruction}")
+        print(f"🎯 El oráculo ha bendecido el género: {direct_genre}")
+        debug_print(f"📝 Instrucción: {instruction}")
         run_request_with_direct_genre(instruction, direct_genre, out_path)
     else:
         run_request(args.pedido, out_path)

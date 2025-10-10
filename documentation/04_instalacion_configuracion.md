@@ -141,7 +141,7 @@ SPOTIFY_REDIRECT_URI=https://localhost:8080/callback
 SEARCH_MODE=no_api_first  # no_api_first | api_first | no_api_only | api_only
 
 # Fuentes sin API
-NOAPI_SOURCES=ytsearch,ytmusicsearch,scsearch
+NOAPI_SOURCES=ytsearch,scsearch
 
 # Presupuesto YouTube API
 YOUTUBE_CALL_BUDGET=4000000

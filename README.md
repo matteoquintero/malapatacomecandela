@@ -47,7 +47,7 @@ Variables principales:
 - `LIB_BASE_DIR`: base de tu librería de música.
 - `MANIFEST_FILE`: ruta del manifest (por defecto dentro del proyecto).
 - `SEARCH_MODE`: `no_api_first` | `api_first` | `no_api_only` | `api_only`.
-- `NOAPI_SOURCES`: `ytsearch,ytmusicsearch,scsearch`.
+- `NOAPI_SOURCES`: `ytsearch,scsearch`.
 - `YOUTUBE_API_KEY` (opcional): activa búsquedas vía API.
 - `OPENAI_API_KEY` (opcional) y `OPENAI_MODEL`.
 - `DISCOGS_TOKEN` (opcional): mejora resultados.

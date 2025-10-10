@@ -323,7 +323,7 @@ def parse_playlist_id(s):
 
 ```bash
 SEARCH_MODE=no_api_first
-NOAPI_SOURCES=ytsearch,ytmusicsearch,scsearch
+NOAPI_SOURCES=ytsearch,scsearch
 YTDLP_BIN=yt-dlp
 ```
 
@@ -334,12 +334,6 @@ YTDLP_BIN=yt-dlp
 - Búsqueda estándar de YouTube
 - Sin costo de API
 - Resultados limitados
-
-#### ytmusicsearch
-
-- Búsqueda en YouTube Music
-- Mejor para contenido musical
-- Resultados más relevantes
 
 #### scsearch
 

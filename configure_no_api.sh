@@ -43,7 +43,6 @@ fi
 echo ""
 echo "🎯 El sistema ahora usará SOLO métodos sin API:"
 echo "   - ytsearch (búsqueda general de YouTube)"
-echo "   - ytmusicsearch (búsqueda en YouTube Music)"
 echo "   - scsearch (búsqueda en SoundCloud)"
 echo ""
 echo "💡 Para volver a usar la API, edita .env y cambia:"

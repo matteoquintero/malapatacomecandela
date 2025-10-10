@@ -13,9 +13,9 @@ Pipeline CSV -> (YouTube ID via override o búsqueda) -> Clasificación 16 géne
     * Caché mensual de info de canales + caché de búsquedas (artist|title)
     * Contadores de cuota por canción y totales (con costos de la API)
 - Modo SIN API:
-    * Búsqueda con yt-dlp (ytsearch/ytmusicsearch/scsearch) para obtener IDs sin gastar cuota
-    * Control por .env: SEARCH_MODE = no_api_first | api_first | no_api_only | api_only
-    * NOAPI_SOURCES = ytsearch,ytmusicsearch,scsearch
+    * Búsqueda con yt-dlp (ytsearch/scsearch) para obtener IDs sin gastar cuota
+    * Control por .env: SEARCH_MODE = no_api_first | api_first | no_api_only | api_only | ytsearch | scsearch
+    * NOAPI_SOURCES = ytsearch,scsearch
 """
 
 import os
@@ -30,6 +30,9 @@ import subprocess
 import traceback
 import unicodedata
 import shutil
+import random
+import threading
+import time
 from datetime import datetime, timedelta
 from collections import defaultdict
 from typing import Dict, List, Optional
@@ -122,9 +125,9 @@ _total_api_calls: Dict[str, int] = defaultdict(int)
 
 # ====== BÚSQUEDA SIN API (yt-dlp) ======
 SEARCH_MODE = os.getenv("SEARCH_MODE", "no_api_first").strip().lower()
-# opciones: no_api_first | api_first | no_api_only | api_only
+# opciones: no_api_first | api_first | no_api_only | api_only | ytsearch | scsearch
 NOAPI_SOURCES = [s.strip() for s in os.getenv(
-    "NOAPI_SOURCES", "ytsearch,ytmusicsearch,scsearch").split(",") if s.strip()]
+    "NOAPI_SOURCES", "ytsearch,scsearch").split(",") if s.strip()]
 YTDLP_BIN = os.getenv("YTDLP_BIN", "yt-dlp")
 # Deshabilitar fallback a API completamente
 DISABLE_API_FALLBACK = os.getenv("DISABLE_API_FALLBACK", "false").lower() in [
@@ -535,8 +538,9 @@ def classify(meta: Dict) -> Dict:
     best = top[0] if top else HeuristicResult(
         "salsa_dura_clasica", 0.0, ["default"])
     conf_heur = probs[0] if probs else 0.0
-    print(
-        f"   🔎 Heurística top: {[(t.slug, round(s, 2)) for t, s in zip(top, raw_scores)]}")
+    top_genre = top[0].slug if top else "desconocido"
+    top_score = round(raw_scores[0], 2) if raw_scores else 0.0
+    print(f"   🧮 Oráculo heurístico: {top_genre} (+{top_score})")
 
     # Si estás en LLM_ONLY, NO uses puerta por heurística
     if use_heur_gate and conf_heur >= LOW_CONF_THRESHOLD:
@@ -570,7 +574,8 @@ def classify(meta: Dict) -> Dict:
     else:
         final_conf = max(conf_llm, conf_heur + 0.05)
 
-    print(f"   ✅ LLM propone → {slug} ({round(final_conf, 3)})")
+    print(
+        f"     😈 Consejo del Demonio: {slug} (confianza: {round(final_conf, 3)})")
     return {
         "slug": slug,
         "confidence": round(final_conf, 3),
@@ -582,10 +587,11 @@ def classify(meta: Dict) -> Dict:
 
 
 def build_library_index(base_dir: str) -> set:
-    print(f"📚 Indexando librería en: {base_dir}")
+    debug_print(f"📚 Indexando librería en: {base_dir}")
     known = set()
     if not os.path.exists(base_dir):
-        print("   ℹ️ Directorio no existe, se saltará el dedupe por archivos.")
+        debug_print(
+            "   ℹ️ Directorio no existe, se saltará el dedupe por archivos.")
         return known
     cnt = 0
     for _, _, files in os.walk(base_dir):
@@ -596,7 +602,7 @@ def build_library_index(base_dir: str) -> set:
                     a, t = name.split(" - ", 1)
                     known.add(norm_key(a, t))
                     cnt += 1
-    print(f"   ✅ {cnt} MP3 indexados para dedupe por nombre.")
+    debug_print(f"   ✅ {cnt} MP3 indexados para dedupe por nombre.")
     return known
 
 
@@ -979,6 +985,7 @@ def search_youtube_id(query: str, max_results: int, artist_hint: str, title_hint
             "description": it["snippet"].get("description", "") or "",
             "_rank": idx
         })
+    loading_thread.stop()  # Detener bucle de mensajes
     print(f"   🔍 YouTube resultados (strict): {len(strict_items)}")
 
     if strict_items:
@@ -1015,7 +1022,7 @@ def _yt_dlp_available() -> bool:
 
 def yt_dlp_search(query: str, max_results: int = 5, source: str = "ytsearch") -> List[Dict]:
     """
-    source: ytsearch | ytmusicsearch | scsearch
+    source: ytsearch | scsearch
     Devuelve items con: video_id, title, channel, description (vacía), _rank, _noapi
     """
     if not _yt_dlp_available():
@@ -1034,12 +1041,18 @@ def yt_dlp_search(query: str, max_results: int = 5, source: str = "ytsearch") ->
         # Si el comando fue exitoso, procesar normalmente
         if result.returncode == 0:
             items = _parse_yt_dlp_output(result.stdout, max_results)
-            print(f"   🔍 {source} resultados (no API): {len(items)}")
+            loading_thread.stop()  # Detener bucle de mensajes
+            print(
+                f"   🔍 Explorando el oráculo ({source}, no API) → {len(items)} hallazgos")
             return items
 
         # Si falló pero hay stdout, intentar extraer información de los errores
         debug_print(
             f"   ⚠️ {source} falló con código {result.returncode}, intentando extraer IDs de stderr...")
+
+        # DEBUG: Mostrar stdout y stderr para entender qué está pasando
+        debug_print(f"   🐛 DEBUG - stdout: {result.stdout[:500]}...")
+        debug_print(f"   🐛 DEBUG - stderr: {result.stderr[:500]}...")
 
         # Estrategia 2: Extraer video IDs de los mensajes de error
         video_ids = _extract_video_ids_from_error(result.stderr)
@@ -1047,6 +1060,7 @@ def yt_dlp_search(query: str, max_results: int = 5, source: str = "ytsearch") ->
             debug_print(
                 f"   🔍 Encontrados {len(video_ids)} video IDs en errores: {video_ids}")
             items = _create_items_from_ids(video_ids, max_results)
+            loading_thread.stop()  # Detener bucle de mensajes
             print(
                 f"   🔍 {source} resultados (extraídos de errores): {len(items)}")
             return items
@@ -1055,12 +1069,14 @@ def yt_dlp_search(query: str, max_results: int = 5, source: str = "ytsearch") ->
         debug_print(f"   🔄 Intentando con --list-formats para {source}...")
         items = _try_list_formats_search(query, max_results, source)
         if items:
+            loading_thread.stop()  # Detener bucle de mensajes
             print(f"   🔍 {source} resultados (list-formats): {len(items)}")
             return items
 
     except Exception as e:
         debug_print(f"   ❌ Error en {source}: {e}")
 
+    loading_thread.stop()  # Detener bucle de mensajes
     print(
         f"   ℹ️ yt-dlp search error ({source}): No se pudieron obtener resultados")
     return []
@@ -1098,29 +1114,98 @@ def _extract_video_ids_from_error(stderr: str) -> List[str]:
     import re
     pattern = r'\[youtube\]\s+([A-Za-z0-9_-]{11}):'
     matches = re.findall(pattern, stderr)
+    debug_print(f"   🐛 DEBUG - Patrón regex: {pattern}")
+    debug_print(f"   🐛 DEBUG - Matches encontrados: {matches}")
     for match in matches:
         if match not in video_ids:
             video_ids.append(match)
+    debug_print(f"   🐛 DEBUG - Video IDs extraídos: {video_ids}")
     return video_ids
+
+
+def _get_real_metadata_from_video_ids(video_ids: List[str], max_results: int) -> List[Dict]:
+    """Intenta obtener metadatos reales de video IDs usando workarounds de SABR"""
+    items = []
+    debug_print(
+        f"   🐛 DEBUG - Intentando obtener metadatos reales para {len(video_ids)} video IDs: {video_ids}")
+
+    for i, vid in enumerate(video_ids[:max_results]):
+        debug_print(f"   🐛 DEBUG - Procesando video ID: {vid}")
+
+        # Estrategias para obtener metadatos reales (primero la original, luego workarounds)
+        strategies = [
+            # Estrategia 1: Método original (igual al que falló en la búsqueda)
+            [YTDLP_BIN, "--print", "%(id)s|||%(title)s|||%(uploader)s",
+             "--skip-download", f"https://www.youtube.com/watch?v={vid}"],
+            # Estrategia 2: Con workaround SABR
+            [YTDLP_BIN, "--print", "%(id)s|||%(title)s|||%(uploader)s", "--skip-download", "--extractor-args",
+             "youtube:formats=missing_pot", f"https://www.youtube.com/watch?v={vid}"],
+            # Estrategia 3: Con formato específico
+            [YTDLP_BIN, "--print", "%(id)s|||%(title)s|||%(uploader)s", "--skip-download",
+             "--format", "bestaudio", f"https://www.youtube.com/watch?v={vid}"],
+        ]
+
+        metadata_found = False
+        for strategy_num, cmd in enumerate(strategies, 1):
+            debug_print(
+                f"   🐛 DEBUG - Estrategia {strategy_num} para {vid}: {' '.join(cmd)}")
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=30)
+                if result.returncode == 0 and result.stdout.strip():
+                    # Parsear la salida
+                    parts = result.stdout.strip().split("|||")
+                    if len(parts) >= 3:
+                        title = parts[1].strip()
+                        uploader = parts[2].strip()
+                        debug_print(
+                            f"   🐛 DEBUG - ✅ Metadatos reales obtenidos: '{title}' - {uploader}")
+                        items.append({
+                            "video_id": vid,
+                            "title": title,
+                            "channel": uploader,
+                            "channel_id": "",
+                            "description": "",
+                            "channel_title_full": uploader,
+                            "channel_desc": "",
+                            "channel_subs": 0,
+                            "_rank": i + 1,
+                            "_noapi": True
+                        })
+                        metadata_found = True
+                        break
+                else:
+                    debug_print(
+                        f"   🐛 DEBUG - ❌ Estrategia {strategy_num} falló: {result.stderr[:100]}...")
+            except Exception as e:
+                debug_print(
+                    f"   🐛 DEBUG - ❌ Estrategia {strategy_num} error: {e}")
+
+        # Si ninguna estrategia funcionó, usar título genérico
+        if not metadata_found:
+            generic_title = f"Video {vid}"
+            debug_print(
+                f"   🐛 DEBUG - ⚠️ Usando título genérico: '{generic_title}' para video ID: {vid}")
+            items.append({
+                "video_id": vid,
+                "title": generic_title,  # Título genérico
+                "channel": "Unknown",     # Canal desconocido
+                "channel_id": "",
+                "description": "",
+                "channel_title_full": "Unknown",
+                "channel_desc": "",
+                "channel_subs": 0,
+                "_rank": i + 1,
+                "_noapi": True
+            })
+
+    return items
 
 
 def _create_items_from_ids(video_ids: List[str], max_results: int) -> List[Dict]:
     """Crea items básicos a partir de video IDs extraídos de errores"""
-    items = []
-    for i, vid in enumerate(video_ids[:max_results]):
-        items.append({
-            "video_id": vid,
-            "title": f"Video {vid}",  # Título genérico
-            "channel": "Unknown",     # Canal desconocido
-            "channel_id": "",
-            "description": "",
-            "channel_title_full": "Unknown",
-            "channel_desc": "",
-            "channel_subs": 0,
-            "_rank": i + 1,
-            "_noapi": True
-        })
-    return items
+    # Usar la nueva función que intenta obtener metadatos reales
+    return _get_real_metadata_from_video_ids(video_ids, max_results)
 
 
 def _try_list_formats_search(query: str, max_results: int, source: str) -> List[Dict]:
@@ -1166,7 +1251,7 @@ def find_candidates_noapi(artist: str, title: str, max_results: int = 5) -> List
 
     for src in NOAPI_SOURCES:
         src = src.lower()
-        if src not in ("ytsearch", "ytmusicsearch", "scsearch"):
+        if src not in ("ytsearch", "scsearch"):
             debug_print(f"   ⚠️ Fuente no válida: {src}")
             continue
         tried.append(src)
@@ -1383,7 +1468,7 @@ def choose_best_candidate(cands: List[Dict], artist: str, title: str) -> Optiona
             artist, ch, official_like) * 0.6
 
         print(
-            f"   · candidato: {raw_title} | ch:{ch} | score:{score:.2f} | dur:{dur}s | views:{views} | rank:{rank} | subs:{subs} | no_api:{from_noapi}")
+            f"     ◽ {ch} · {raw_title} [score:{score:.2f} ch:{ch} id:{c.get('video_id', '')} subs:{subs}]")
         if score > best_score:
             best, best_score = c, score
 
@@ -1393,7 +1478,7 @@ def choose_best_candidate(cands: List[Dict], artist: str, title: str) -> Optiona
                 f"   ❌ Mejor candidato insuficiente [{best_score:.2f}] → sin match")
             return None
         print(
-            f"   ✅ Candidato elegido: {best['title']} ({best['video_id']})  [{best_score:.2f}]")
+            f"   ✅ Selección del fuego: {best['title']} ({best['video_id']}) [{best_score:.2f}]")
     return best
 
 
@@ -1440,26 +1525,105 @@ def run_download(video_id: str, artist: str, title: str, slug: str, image_type: 
     command = GENRE_COMMAND[slug]
     # Ejecutar el script cargando las funciones primero
     cmd = f'export __MPCC_FROM_PIPELINE=1 && source {shlex.quote(DL_SCRIPT)} && {command} "{video_id}" "{artist}" "{title}" {image_type}'
-    print(
-        f"   ⬇️ Ejecutando: {command} {video_id} … artist: {artist} title: {title}")
+    print(f"   ⬇️ Invocando descarga: {command} {video_id}")
+    print(f"     · artista: {artist}")
+    print(f"     · título: {title}")
     return subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
+
+# ========= Mensajes de descarga =========
+
+
+def get_download_success_message():
+    """Retorna un mensaje aleatorio de descarga exitosa."""
+    messages = [
+        "📦 Sellado en vinilo digital",
+        "🪄 El conjuro prendió: ya suena en tu colección.",
+        "📡 Señal interceptada y almacenada.",
+        "🔥 El track arde ahora en tu biblioteca."
+    ]
+    return random.choice(messages)
+
+
+def get_download_failure_message():
+    """Retorna un mensaje de descarga fallida."""
+    return "🙅‍♂️ La candela se apagó intenta de nuevo"
+
+
+class LoadingMessageThread:
+    """Maneja el bucle de mensajes de carga en un hilo separado."""
+
+    def __init__(self):
+        self.running = False
+        self.thread = None
+        self.messages = [
+            # Estilo fuego/caldera
+            "⏳ La caldera se está encendiendo… aguanta la chispa.",
+            "🔥 Soplando brasas… la candela casi prende.",
+            "♨️ El fogón ruge lento, pero pronto arderá.",
+            "🪵 Alimentando la hoguera… paciencia, que se viene fuego.",
+
+            # Estilo cyberpunk/tech
+            "⌛ Inicializando turbinas sonoras…",
+            "⚡ Procesando bits incandescentes, espera…",
+            "🤖 La máquina mastica tus tracks, aguanta el pulso.",
+            "💿 Decodificando frecuencias ocultas…",
+
+            # Estilo mágico/ritual
+            "🔮 El conjuro está en curso… no interrumpas el rito.",
+            "🕯️ Encendiendo velas, preparando el hechizo musical…",
+            "🌌 Los espíritus buscan tus canciones en el éter.",
+            "✨ El oráculo gira lento, pero la revelación llega."
+        ]
+
+    def start(self):
+        """Inicia el bucle de mensajes de carga."""
+        if self.running:
+            return
+
+        self.running = True
+        self.thread = threading.Thread(target=self._message_loop, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        """Detiene el bucle de mensajes de carga."""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=0.1)
+
+    def _message_loop(self):
+        """Bucle principal que muestra mensajes cada 3 segundos."""
+        while self.running:
+            message = random.choice(self.messages)
+            print(f"   {message}")
+            time.sleep(6)
+
+
+# Instancia global para el bucle de mensajes
+loading_thread = LoadingMessageThread()
+
+
+def get_loading_message():
+    """Retorna un mensaje aleatorio de carga/procesamiento."""
+    return random.choice(loading_thread.messages)
 
 # ========= Proceso CSV =========
 
 
 def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type: str = "hq", sleep_s: float = 0.6):
-    print(f"📂 Abriendo CSV de entrada: {input_csv}")
-    print(f"🧾 Manifest: {MANIFEST_FILE}")
+    print(f"🔥 La llama se enciende con: {os.path.basename(input_csv)}")
+    debug_print(f"📂 Abriendo CSV de entrada: {input_csv}")
+    debug_print(f"🧾 Manifest: {MANIFEST_FILE}")
     ensure_manifest(MANIFEST_FILE)
     manifest_keys = load_manifest_keys(MANIFEST_FILE)
-    print(f"   ✅ {len(manifest_keys)} entradas en manifest (artist|title).")
+    debug_print(
+        f"   ✅ {len(manifest_keys)} entradas en manifest (artist|title).")
 
     lib_index = build_library_index(LIB_BASE_DIR)
 
     total_rows = 0
     with open(input_csv, encoding="utf-8") as f:
         total_rows = max(sum(1 for _ in f) - 1, 0)
-    print(f"🧾 Filas (sin header): {total_rows}")
+    debug_print(f"🧾 Filas (sin header): {total_rows}")
 
     os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
 
@@ -1478,12 +1642,13 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                 artist = (row.get("artist") or "").strip()
                 title = (row.get("title") or "").strip()
                 q_override = (row.get("query_override") or "").strip()
-                print(f"\n——— [{idx}/{total_rows}] {artist} — {title} ———")
-                print(
+                print(f"\n🎵 [{idx}/{total_rows}] {artist} — {title}")
+                loading_thread.start()  # Iniciar bucle de mensajes
+                debug_print(
                     f"   💳 Presupuesto restante antes de esta pista: {_budget_left()}u")
 
                 if not artist or not title:
-                    print("   ⚠️ Fila incompleta, saltando.")
+                    print("   ⚠️ Pergamino incompleto, saltando.")
                     skipped += 1
                     continue
 
@@ -1496,7 +1661,7 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
 
                 nk = norm_key(artist, title)
                 if nk in manifest_keys:
-                    print("   ⏭️ Ya está en manifest → skip.")
+                    print("   ⏭️ Ya bendecido → skip")
                     writer.writerow({
                         "artist": artist, "title": title, "query_used": q_override or f"{artist} {title}",
                         "video_id": "", "predicted_genre": "", "confidence": 1.0,
@@ -1509,7 +1674,7 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                     continue
 
                 if nk in lib_index:
-                    print("   ⏭️ Ya existe en librería → skip.")
+                    print("   ⏭️ Ya en el archivo → skip")
                     writer.writerow({
                         "artist": artist, "title": title, "query_used": q_override or f"{artist} {title}",
                         "video_id": "", "predicted_genre": "", "confidence": 1.0,
@@ -1527,8 +1692,7 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                 if vid_override:
                     video_id = vid_override
                     used_query = f"ID directo: {video_id}"
-                    print(
-                        f"   🔗 Usando VIDEO_ID directo desde override: {video_id}")
+                    print(f"   🎯 Sello directo encontrado: {video_id}")
                     best_meta = {"title": title, "artist": artist,
                                  "description": "", "channel": ""}
 
@@ -1545,39 +1709,47 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                     used_query = f"{artist} {title}"
 
                     if SEARCH_MODE == "no_api_only":
-                        print("   🌐 Modo búsqueda: NO_API_ONLY")
+                        debug_print("   🌐 Modo búsqueda: NO_API_ONLY")
                         cands = _try_noapi()
 
                     elif SEARCH_MODE == "api_only":
-                        print("   🌐 Modo búsqueda: API_ONLY")
+                        debug_print("   🌐 Modo búsqueda: API_ONLY")
                         if _budget_left() <= 0:
-                            print(
-                                "   ⛔ Presupuesto API agotado, sin fallback por configuración.")
+                            print("   ⛔ La llama se ha apagado")
                             cands = []
                         else:
                             cands = _try_api()
 
                     elif SEARCH_MODE == "api_first":
-                        print("   🌐 Modo búsqueda: API_FIRST")
+                        debug_print("   🌐 Modo búsqueda: API_FIRST")
                         if not DISABLE_API_FALLBACK and _budget_left() > 0:
                             cands = _try_api()
                         if not cands:
-                            print("   ↪️ Fallback a NO_API...")
+                            debug_print("   ↪️ Fallback a NO_API...")
                             cands = _try_noapi()
+
+                    elif SEARCH_MODE == "ytsearch":
+                        debug_print("   🌐 Modo búsqueda: YTSEARCH únicamente")
+                        cands = yt_dlp_search(
+                            f"{artist} {title}", max_results=YOUTUBE_MAX_RESULTS, source="ytsearch")
+
+                    elif SEARCH_MODE == "scsearch":
+                        debug_print("   🌐 Modo búsqueda: SCSEARCH únicamente")
+                        cands = yt_dlp_search(
+                            f"{artist} {title}", max_results=YOUTUBE_MAX_RESULTS, source="scsearch")
 
                     else:
                         # no_api_first (default)
-                        print("   🌐 Modo búsqueda: NO_API_FIRST")
+                        debug_print("   🌐 Modo búsqueda: NO_API_FIRST")
                         cands = _try_noapi()
                         if not cands:
                             # Solo hacer fallback a API si realmente queremos usar la API
                             if not DISABLE_API_FALLBACK and YOUTUBE_API_KEY and _budget_left() > 0:
-                                print("   ↪️ Fallback a API...")
+                                debug_print("   ↪️ Fallback a API...")
                                 cands = _try_api()
                             else:
                                 if DISABLE_API_FALLBACK:
-                                    print(
-                                        "   ⛔ Sin resultados NO_API y fallback a API deshabilitado.")
+                                    print("   ⛔ Los oráculos guardan silencio")
                                 elif not YOUTUBE_API_KEY:
                                     print(
                                         "   ⛔ Sin resultados NO_API y sin API key configurada.")
@@ -1588,7 +1760,7 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
 
                     best = choose_best_candidate(cands, artist, title)
                     if not best:
-                        print("   ❌ Sin resultados adecuados.")
+                        print("   ❌ Los oráculos no responden.")
                         writer.writerow({
                             "artist": artist, "title": title, "query_used": used_query,
                             "video_id": "", "predicted_genre": "", "confidence": 0,
@@ -1603,14 +1775,13 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                     best_meta = {"title": title, "artist": artist, "description": best.get(
                         "description", ""), "channel": best.get("channel_title_full", best.get("channel", ""))}
 
-                print(
+                debug_print(
                     f"   💳 Cuota gastada en esta pista (antes de clasif/descarga): {per_track['quota_units']}u | llamadas: {per_track['api_calls']}")
 
                 # Verificar si hay género directo
                 direct_genre = (row.get("gnere") or "").strip()
                 if direct_genre:
-                    print(
-                        f"   🎯 Género directo: {direct_genre} (sin análisis)")
+                    print(f"   🎯 Bendición directa: {direct_genre}")
                     # Mapear género directo a comando
                     genre_to_command = {
                         "balada": "dl-balada",
@@ -1619,7 +1790,7 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                         "techno": "dl-techno"
                     }
                     if direct_genre not in genre_to_command:
-                        print(f"   ❌ Género directo no válido: {direct_genre}")
+                        print(f"   ❌ Bendición desconocida: {direct_genre}")
                         skipped += 1
                         continue
 
@@ -1632,7 +1803,7 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                 else:
                     # Clasificar normalmente
                     cls = classify(best_meta)
-                    print(f"   🎯 Género: {cls['slug']} ({cls['confidence']})")
+                    print(f"   🎯 Dictamen final → {cls['slug']}")
 
                 # Descargar
                 status, stdout_tail, stderr_tail, filepath_hint = "skipped(dryrun)", "", "", ""
@@ -1642,7 +1813,10 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                     status = "downloaded" if r.returncode == 0 else f"error({r.returncode})"
                     stdout_tail, stderr_tail = (
                         r.stdout or "")[-300:], (r.stderr or "")[-300:]
-                    print(f"   📦 Resultado descarga: {status}")
+                    if status == "downloaded":
+                        print(f"   {get_download_success_message()}")
+                    else:
+                        print(f"   {get_download_failure_message()}")
 
                     if status != "downloaded":
                         # Diagnóstico adicional
@@ -1701,18 +1875,20 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                     "yt_quota_units": per_track["quota_units"], "yt_calls_json": json.dumps(per_track["api_calls"])
                 })
 
-                print(
+                debug_print(
                     f"   ✅ Cuota final por pista: {per_track['quota_units']}u | llamadas: {per_track['api_calls']}")
                 time.sleep(sleep_s)
 
             except Exception:
-                print("   💥 Error procesando fila:")
+                print("   💥 El pergamino se ha roto:")
                 traceback.print_exc()
                 errors += 1
 
-    print(f"\n✅ Terminado. Descargadas: {downloaded} | Skips: {skipped}")
-    _print_totals()
-    print(f"📝 Log en: {out_csv}")
+    print(
+        f"\n🔥 La llama se ha consumado: {downloaded} bendiciones | {skipped} ya consagradas")
+    debug_print(f"📝 Log detallado en: {out_csv}")
+    if _total_quota_units > 0:
+        _print_totals()
 
 
 def extract_video_id(s: Optional[str]) -> Optional[str]:
