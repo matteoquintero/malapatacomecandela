@@ -1235,7 +1235,7 @@ def search_real_songs_spotify(artist: str, count: int, genre: Optional[str] = No
         return []
 
 
-def generate_real_songs_with_openai(artist: str, count: int, genre: Optional[str] = None) -> List[Dict]:
+def generate_real_songs_with_openai(artist: str, count: int, genre: Optional[str] = None, nl_request: Optional[str] = None) -> List[Dict]:
     """
     Usa OpenAI para encontrar canciones reales del artista cuando no se encuentra en MusicBrainz/Discogs.
     """
@@ -1247,7 +1247,12 @@ def generate_real_songs_with_openai(artist: str, count: int, genre: Optional[str
             if genre:
                 genre_context = f" en el estilo de {genre.replace('_', ' ')}"
 
-            prompt = f"""Necesito que me proporciones {count} canciones REALES del artista "{artist}"{genre_context}.
+            # Agregar contexto de la solicitud del usuario si está disponible
+            user_context = ""
+            if nl_request:
+                user_context = f"\n\nContexto de la solicitud del usuario: \"{nl_request}\"\nTen en cuenta esta solicitud para elegir las canciones más apropiadas."
+
+            prompt = f"""Necesito que me proporciones {count} canciones REALES del artista "{artist}"{genre_context}.{user_context}
 
 IMPORTANTE:
 - Debe ser canciones que realmente existen
@@ -1276,11 +1281,36 @@ Canción 3"""
 
             # Verificar si OpenAI no conoce al artista
             if "NO_CONOZCO" in titles_text.upper() or "NO CONOZCO" in titles_text.upper():
-                debug_print(f"🤖 OpenAI no conoce canciones reales de {artist}")
-                return []
+                print(
+                    f"   ⚠️ OpenAI no conoce al artista '{artist}', usando títulos genéricos...")
+                # Usar fallback básico en lugar de devolver vacío
+                titles = generate_basic_fictional_titles(artist, count, genre)
+                rows = []
+                for title in titles[:count]:
+                    rows.append({
+                        "artist": artist,
+                        "title": title,
+                        "query_override": f"{artist} {title}",
+                        "source": "fictional_basic"
+                    })
+                return rows
 
             titles = [title.strip() for title in titles_text.split('\n') if title.strip(
             ) and not title.strip().startswith(('1.', '2.', '3.', '4.', '5.'))]
+
+            if len(titles) == 0:
+                print(
+                    f"   ⚠️ OpenAI no pudo generar títulos válidos, usando títulos genéricos...")
+                titles = generate_basic_fictional_titles(artist, count, genre)
+                rows = []
+                for title in titles[:count]:
+                    rows.append({
+                        "artist": artist,
+                        "title": title,
+                        "query_override": f"{artist} {title}",
+                        "source": "fictional_basic"
+                    })
+                return rows
 
             debug_print(
                 f"🤖 OpenAI encontró {len(titles)} canciones reales de {artist}")
@@ -1308,9 +1338,9 @@ Canción 3"""
         return rows
 
     except Exception as e:
-        debug_print(f"⚠️ Error generando canciones: {e}")
+        print(f"   ⚠️ Error al consultar OpenAI: {e}")
+        print(f"   🔄 Usando títulos genéricos como fallback...")
         # Fallback final: generador básico
-        debug_print("🔄 Usando generador básico como fallback")
         titles = generate_basic_fictional_titles(artist, count, genre)
         rows = []
         for title in titles[:count]:
@@ -1587,15 +1617,16 @@ def run_request(nl_request: str, out_csv: str):
                 genre
             )
 
-            # Si Spotify no encuentra nada, usar OpenAI con prompt del usuario
-            if not rows:
-                print(
-                    f"🤖 Spotify no encontró nada, usando OpenAI para buscar canciones reales...")
-                rows = generate_real_songs_with_openai(
-                    plan["artist"],
-                    int(plan.get("count") or 10),
-                    genre
-                )
+        # Si Spotify no encuentra nada, usar OpenAI con prompt del usuario
+        if not rows:
+            print(
+                f"🤖 Spotify no encontró nada, usando OpenAI para buscar canciones reales...")
+            rows = generate_real_songs_with_openai(
+                plan["artist"],
+                int(plan.get("count") or 10),
+                genre,
+                nl_request
+            )
 
         if not rows:
             print("❌ No se pudo generar el CSV.")
@@ -1782,7 +1813,7 @@ def run_request_with_direct_genre(nl_request: str, direct_genre: str, out_csv: s
                     f"   ⚠️ No se encontraron canciones de {artist} en MusicBrainz/Discogs.")
                 print(f"   🤖 Generando canciones con OpenAI...")
                 rows = generate_real_songs_with_openai(
-                    artist, count, direct_genre)
+                    artist, count, direct_genre, nl_request)
         else:
             # Para géneros directos sin artista específico, usar búsqueda genérica
             print(
