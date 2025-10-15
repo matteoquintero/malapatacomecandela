@@ -230,6 +230,74 @@ def extract_count(user_text: str) -> Optional[int]:
     return None
 
 
+# ===== Intent detection (simple vs complejo) =====
+COMPLEX_KEYWORDS = [
+    # popularidad / ranking
+    r"\b(m[aá]s\s+famos[ao]s?|m[aá]s\s+escuchad[ao]s?|lo\s+m[aá]s\s+(famoso|popular)|top\s+\d+|mejores|greatest hits|con\s+m[aá]s\s+reproducciones)\b",
+    # anti-pop / underground / lado B
+    r"\b(underground|lado\s*b|deep\s*cuts?|rar[ao]s?|poco\s+conocid[ao]s?|que\s+no\s+sean\s+hits?|sin\s+hits?|no\s+comercial(es)?)\b",
+    # filtros curatoriales
+    r"\b(en\s+vivo|versi[oó]n\s+en\s+vivo|live|colaboraci[oó]n|featuring|feat\.?)\b",
+    r"\b(entre\s+1[89]\d{2}\s+y\s+20\d{2}|d[eé]cada\s+de\s+los\s+\d{2}|\b19\d{2}\b|\b20\d{2}\b)\b",
+    r"\b(idioma|en\s+espa[nñ]ol|en\s+ingl[eé]s)\b",
+    # pedidos "superlativos" específicos
+    r"\b(la\s+(m[aá]s\s+)?(iconic|ic[oó]nica|emblem[aá]tica|cl[aá]sica))\b",
+]
+
+ALBUM_PAT = re.compile(r"\b(al[bv]um|álbum|lp|disco)\b", re.I)
+SINGLE_PAT = re.compile(r"\b(canci[oó]n|track|tema)\b", re.I)
+
+
+def is_complex_request(user_text: str) -> bool:
+    t = _strip_accents(user_text.lower())
+    for pat in COMPLEX_KEYWORDS:
+        if re.search(pat, t, flags=re.I):
+            return True
+    return False
+
+
+def classify_request(user_text: str) -> Dict:
+    """
+    Devuelve:
+      {
+        "mode": "simple"|"complex",
+        "kind": "playlist"|"album"|"single"|"artist_playlist",
+        "count": int|None,
+        "artist_hint": str|None,
+        "album_hint": str|None,
+        "title_hint": str|None
+      }
+    """
+    mode = "complex" if is_complex_request(user_text) else "simple"
+    kind = "playlist"
+    artist_hint = _guess_artist_from_text(user_text)
+    album_hint = None
+    title_hint = None
+
+    # detectar álbum explícito (ALBUM_PAT ya tiene re.I compilado)
+    if ALBUM_PAT.search(user_text):
+        kind = "album"
+
+    # detectar "una canción" / "la canción ..." (más bien single)
+    if SINGLE_PAT.search(user_text):
+        # si no menciona álbum y parece una sola canción
+        if extract_count(user_text) in (None, 1):
+            kind = "single"
+
+    # heurística: "X canciones de <artista>"
+    if artist_hint and kind == "playlist":
+        kind = "artist_playlist"
+
+    return {
+        "mode": mode,
+        "kind": kind,
+        "count": extract_count(user_text),
+        "artist_hint": artist_hint,
+        "album_hint": album_hint,
+        "title_hint": title_hint,
+    }
+
+
 # ===== Anclas por género =====
 ANCHOR_ARTISTS: Dict[str, List[str]] = {
     "son_cubano": ["Trío Matamoros", "Arsenio Rodríguez", "Septeto Nacional", "Ignacio Piñeiro", "Compay Segundo", "Eliades Ochoa"],
@@ -496,6 +564,41 @@ SYSTEM_DIRECT_GENRE = (
     "Devuelve ÚNICAMENTE el JSON, sin explicaciones adicionales."
 )
 
+# ===== SYSTEM para pedidos curatoriales/"complejos" =====
+SYSTEM_CURATOR = (
+    "Eres un planificador musical experto en música afrolatina (salsa y afines). "
+    "Analiza la solicitud y devuelve SOLO JSON (sin explicaciones) con este esquema:\n"
+    "{\n"
+    "  \"task\": \"album\" | \"playlist\" | \"single\",\n"
+    "  \"count\": <int or null>,\n"
+    "  \"genre\": <string or null>,\n"
+    "  \"substyle\": <\"underground\"|\"comercial\"|null>,\n"
+    "  \"artist\": <string or null>,\n"
+    "  \"album\": <string or null>,\n"
+    "  \"title\": <string or null>,\n"
+    "  \"constraints\": {\n"
+    "     \"popularity\": \"famous\" | \"underground\" | null,\n"
+    "     \"year_min\": <int or null>,\n"
+    "     \"year_max\": <int or null>,\n"
+    "     \"live\": <true|false|null>,\n"
+    "     \"collab\": <true|false|null>,\n"
+    "     \"language\": <string or null>\n"
+    "  }\n"
+    "}\n"
+    "Reglas:\n"
+    "- Si pide 'la más famosa', 'top', 'más escuchada': constraints.popularity=\"famous\".\n"
+    "- Si pide 'underground', 'lado B', 'deep cuts', 'sin hits': constraints.popularity=\"underground\".\n"
+    "- En vivo: live=true si lo pide; colaboraciones: collab=true si pide feat/featuring.\n"
+    "- Si menciona años o décadas, setea year_min/year_max. Si no hay, deja null.\n"
+    "- Si pide 1 sola canción significativa → task=\"single\" y setea title si está en la frase (si no, deja null).\n"
+    "- Si menciona artista sin álbum → artist=<nombre> y album=null.\n"
+    "- Género: usa uno de {son_cubano, guajira_moderna, guaracha, rumba_guaguanco, afro_cuban_jazz_descarga, "
+    "mambo, cha_cha_cha, boogaloo, salsa_dura_clasica, guaguanco_fusionado, exotica, latin_soul, "
+    "plena_bomba, salsa_romantica, timba, salsa_dura_revival} cuando sea claro; si no, null.\n"
+    "- count: usa el número explícito; si no hay, 10 para playlist / 1 para single.\n"
+    "- Devuelve JSON válido y nada más."
+)
+
 
 def _clean_artist_name(artist_name: str) -> str:
     """
@@ -610,12 +713,19 @@ def _guess_artist_from_text(user_text: str) -> Optional[str]:
     return None
 
 
-def llm_plan(user_text: str, direct_genre: str = None) -> Dict:
+def llm_plan(user_text: str, direct_genre: str = None, force_openai: bool = False) -> Dict:
+    """
+    - force_openai=True: usa SYSTEM_CURATOR (pedido complejo/curatorial)
+    - direct_genre: mantiene tu camino de género directo
+    """
     default = {"task": "playlist", "count": 10, "genre": None,
-               "substyle": None, "artist": None, "album": None}
+               "substyle": None, "artist": None, "album": None,
+               "title": None,
+               "constraints": {"popularity": None, "year_min": None, "year_max": None,
+                               "live": None, "collab": None, "language": None}}
 
     # sin OpenAI: heurística + conteo desde texto
-    if not _openai:
+    if not _openai and not force_openai:
         txt = user_text.lower()
         # substyle
         sub = "underground" if any(w in txt for w in ["underground", "oscuro", "crudo", "rare", "deep"]) else \
@@ -653,13 +763,14 @@ def llm_plan(user_text: str, direct_genre: str = None) -> Dict:
 
     # con OpenAI
     try:
-        # Usar SYSTEM específico para géneros directos
-        system_prompt = SYSTEM
+        # Seleccionar el SYSTEM prompt apropiado
         if direct_genre:
             system_prompt = SYSTEM_DIRECT_GENRE.replace(
                 "{DIRECT_GENRE}", direct_genre)
-            default["genre"] = direct_genre
-            default["substyle"] = None
+        elif force_openai:
+            system_prompt = SYSTEM_CURATOR
+        else:
+            system_prompt = SYSTEM
 
         resp = _openai.chat.completions.create(
             model=OPENAI_MODEL,
@@ -677,11 +788,17 @@ def llm_plan(user_text: str, direct_genre: str = None) -> Dict:
 
         # defaults sensatos
         data.setdefault("task", "playlist")
-        data.setdefault("count", 10)
+        if data["task"] == "single":
+            data.setdefault("count", 1)
+        else:
+            data.setdefault("count", 10)
         data.setdefault("genre", None)
         data.setdefault("substyle", None)
         data.setdefault("artist", None)
         data.setdefault("album", None)
+        data.setdefault("title", None)
+        data.setdefault("constraints", {"popularity": None, "year_min": None, "year_max": None,
+                                        "live": None, "collab": None, "language": None})
 
         # refuerza count desde texto si viene explícito
         cnt = extract_count(user_text)
@@ -1254,17 +1371,17 @@ def generate_real_songs_with_openai(artist: str, count: int, genre: Optional[str
 
             prompt = f"""Necesito que me proporciones {count} canciones REALES del artista "{artist}"{genre_context}.{user_context}
 
-IMPORTANTE:
-- Debe ser canciones que realmente existen
-- No inventes títulos ficticios
-- Si no conoces canciones reales de este artista, responde "NO_CONOZCO"
-- Responde SOLO con los títulos de las canciones, uno por línea
-- No incluyas explicaciones ni numeración
+                        IMPORTANTE:
+                        - Debe ser canciones que realmente existen
+                        - No inventes títulos ficticios
+                        - Si no conoces canciones reales de este artista, responde "NO_CONOZCO"
+                        - Responde SOLO con los títulos de las canciones, uno por línea
+                        - No incluyas explicaciones ni numeración
 
-Ejemplo de respuesta:
-Canción 1
-Canción 2
-Canción 3"""
+                        Ejemplo de respuesta:
+                        Canción 1
+                        Canción 2
+                        Canción 3"""
 
             response = _openai.chat.completions.create(
                 model=OPENAI_MODEL,
@@ -1554,15 +1671,34 @@ def write_csv(rows: List[Dict], path: str, direct_genre: str = None):
 
 
 def run_request(nl_request: str, out_csv: str):
+    print("🔎 Analizando intención…")
+    intent = classify_request(nl_request)
+    # fuerza OpenAI si es "complex"
+    force_llm = (intent["mode"] == "complex")
+
+    print(
+        f"   → modo={intent['mode']} | kind={intent['kind']} | count={intent['count'] or '—'} | artist_hint={intent['artist_hint'] or '—'}")
+
     print("🔮 Los oráculos interpretan tu pedido…")
-    plan = llm_plan(nl_request)
+    # Construye el plan con (o sin) fuerza
+    plan = llm_plan(nl_request, force_openai=force_llm)
+
+    # Ajustes suaves: si el detector dijo single, refleja en plan si el LLM no lo hizo
+    if intent["kind"] == "single" and plan.get("task") != "single":
+        plan["task"] = "single"
+        plan["count"] = 1
+
+    # Si el detector encontró artista y el plan no lo puso:
+    if intent["artist_hint"] and not plan.get("artist"):
+        plan["artist"] = intent["artist_hint"]
 
     # Si es playlist y no trae substyle, sesgo por defecto (como tenías)
     if plan.get("task") == "playlist" and not plan.get("substyle"):
         g = (plan.get("genre") or "").lower()
         plan["substyle"] = "underground" if "salsa_dura_clasica" in g else None
 
-    debug_print("   Plan:", plan)
+    print("🧠 Plan:", plan)
+    debug_print("   Plan completo:", plan)
 
     # Verificar si el artista está prohibido
     if plan.get("artist"):
@@ -1779,10 +1915,30 @@ def run_request_with_direct_genre(nl_request: str, direct_genre: str, out_csv: s
     """
     Ejecuta solicitud con género directo (sin análisis de género).
     """
-    print("🔮 Los oráculos interpretan tu pedido con bendición directa…")
-    plan = llm_plan(nl_request, direct_genre=direct_genre)
+    print("🔎 Analizando intención…")
+    intent = classify_request(nl_request)
+    # fuerza OpenAI si es "complex"
+    force_llm = (intent["mode"] == "complex")
 
-    debug_print("   Plan:", plan)
+    print(
+        f"   → modo={intent['mode']} | kind={intent['kind']} | count={intent['count'] or '—'} | artist_hint={intent['artist_hint'] or '—'}")
+
+    print("🔮 Los oráculos interpretan tu pedido con bendición directa…")
+    # Construye el plan con (o sin) fuerza + género directo
+    plan = llm_plan(nl_request, direct_genre=direct_genre,
+                    force_openai=force_llm)
+
+    # Ajustes suaves: si el detector dijo single, refleja en plan si el LLM no lo hizo
+    if intent["kind"] == "single" and plan.get("task") != "single":
+        plan["task"] = "single"
+        plan["count"] = 1
+
+    # Si el detector encontró artista y el plan no lo puso:
+    if intent["artist_hint"] and not plan.get("artist"):
+        plan["artist"] = intent["artist_hint"]
+
+    print("🧠 Plan:", plan)
+    debug_print("   Plan completo:", plan)
 
     # Verificar si el artista está prohibido
     if plan.get("artist"):
