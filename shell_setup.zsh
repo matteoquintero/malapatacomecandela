@@ -11,6 +11,7 @@ alias dl-techno="yt-dlp -x --audio-format mp3 -o \"$MUSIC_BASE/techno/%(title)s.
 alias dl-house="yt-dlp -x --audio-format mp3 -o \"$MUSIC_BASE/house/%(title)s.%(ext)s\""
 alias dl-balada="yt-dlp -x --audio-format mp3 -o \"$MUSIC_BASE/balada/%(title)s.%(ext)s\""
 alias dl-nueva-trova="yt-dlp -x --audio-format mp3 -o \"$MUSIC_BASE/nueva_trova/%(title)s.%(ext)s\""
+alias dl-cumbia="yt-dlp -x --audio-format mp3 -o \"$MUSIC_BASE/cumbia/%(title)s.%(ext)s\""
 alias dl-son-cubano="yt-dlp -x --audio-format mp3 -o \"$MUSIC_BASE/son_cubano/%(title)s.%(ext)s\""
 alias dl-guajira-moderna="yt-dlp -x --audio-format mp3 -o \"$MUSIC_BASE/guajira_moderna/%(title)s.%(ext)s\""
 alias dl-guaracha="yt-dlp -x --audio-format mp3 -o \"$MUSIC_BASE/guaracha/%(title)s.%(ext)s\""

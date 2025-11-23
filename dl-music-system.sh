@@ -32,6 +32,7 @@ unalias dl-nueva-trova 2>/dev/null || true
 unalias dl-plena-bomba 2>/dev/null || true
 unalias dl-rumba-guaguanco 2>/dev/null || true
 unalias dl-techno 2>/dev/null || true
+unalias dl-cumbia 2>/dev/null || true
 
 dl_music() {
     local GENERO="$1"
@@ -111,6 +112,7 @@ dl_music() {
         "dl-plena-bomba") GENRE_DIR="plena_bomba" ;;
         "dl-rumba-guaguanco") GENRE_DIR="rumba_guaguanco" ;;
         "dl-techno") GENRE_DIR="techno" ;;
+        "dl-cumbia") GENRE_DIR="cumbia" ;;
         *)
             echo "❌ Género no reconocido: $GENERO"
             return 1
@@ -283,6 +285,7 @@ dl-nueva-trova() { dl_music "dl-nueva-trova" "$@"; }
 dl-plena-bomba() { dl_music "dl-plena-bomba" "$@"; }
 dl-rumba-guaguanco() { dl_music "dl-rumba-guaguanco" "$@"; }
 dl-techno() { dl_music "dl-techno" "$@"; }
+dl-cumbia() { dl_music "dl-cumbia" "$@"; }
 
 # ===== Mensajes de bienvenida (4 variantes) =====
 print_block_1() {

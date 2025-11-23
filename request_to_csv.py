@@ -560,6 +560,7 @@ SYSTEM_DIRECT_GENRE = (
     "- house: música house y electrónica\n"
     "- nueva_trova: nueva trova cubana\n"
     "- techno: música techno\n"
+    "- dl-cumbia: cumbia digital y cumbia electrónica\n"
     "\n"
     "Devuelve ÚNICAMENTE el JSON, sin explicaciones adicionales."
 )
@@ -1499,7 +1500,8 @@ def generate_basic_fictional_titles(artist: str, count: int, genre: Optional[str
         "balada": ["Amor Eterno", "Te Extraño", "Mi Corazón", "Siempre Te Amaré"],
         "house": ["House Party", "Dance Floor", "Electronic Dreams", "Night Club"],
         "techno": ["Techno Beat", "Digital World", "Machine Music", "Future Sound"],
-        "nueva_trova": ["Canción de Protesta", "El Pueblo Canta", "Libertad", "Revolución"]
+        "nueva_trova": ["Canción de Protesta", "El Pueblo Canta", "Libertad", "Revolución"],
+        "dl-cumbia": ["Cumbia Digital", "Ritmo Electrónico", "Fiesta Cumbiera", "Baile Tropical"]
     }
 
     # Seleccionar títulos
@@ -1789,7 +1791,7 @@ def run_request(nl_request: str, out_csv: str):
 
 
 # ===== Géneros Directos =====
-DIRECT_GENRES = ["balada", "house", "nueva_trova", "techno"]
+DIRECT_GENRES = ["balada", "house", "nueva_trova", "techno", "dl-cumbia"]
 
 # ===== Lista de Artistas y Géneros Prohibidos =====
 # Para agregar nuevos artistas prohibidos, simplemente añádelos a BLOCKED_ARTISTS

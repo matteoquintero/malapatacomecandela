@@ -249,6 +249,7 @@ GENRE_COMMAND: Dict[str, str] = {
     "house": "dl-house",
     "nueva_trova": "dl-nueva-trova",
     "techno": "dl-techno",
+    "cumbia": "dl-cumbia",
 }
 ALL_SLUGS: List[str] = list(GENRE_COMMAND.keys())
 
@@ -1787,7 +1788,8 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                         "balada": "dl-balada",
                         "house": "dl-house",
                         "nueva_trova": "dl-nueva-trova",
-                        "techno": "dl-techno"
+                        "techno": "dl-techno",
+                        "dl-cumbia": "dl-cumbia"
                     }
                     if direct_genre not in genre_to_command:
                         print(f"   ❌ Bendición desconocida: {direct_genre}")
