@@ -149,22 +149,25 @@ dl_music() {
     echo ""
 
     # Try multiple format strategies to handle SABR streaming and format availability issues
-    # Strategy 1: Standard extraction with audio quality 0
-    if yt-dlp -x --audio-format mp3 --audio-quality 0 -o "$FULL_PATH" "$URL" 2>/dev/null; then
+    # Strategy 1: Android client (bypasses 403 errors)
+    if yt-dlp -x --audio-format mp3 --audio-quality 0 --extractor-args "youtube:player_client=android" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+        echo "✅ Descarga exitosa con cliente Android"
+    # Strategy 2: Standard extraction with audio quality 0
+    elif yt-dlp -x --audio-format mp3 --audio-quality 0 -o "$FULL_PATH" "$URL" 2>/dev/null; then
         echo "✅ Descarga exitosa con método estándar"
-    # Strategy 2: Try with specific audio formats for SABR streaming
+    # Strategy 3: Try with specific audio formats for SABR streaming
     elif yt-dlp -x --audio-format mp3 --audio-quality 0 --format "bestaudio[ext=m4a]/bestaudio/best" -o "$FULL_PATH" "$URL" 2>/dev/null; then
         echo "✅ Descarga exitosa con formato m4a/best"
-    # Strategy 3: Try with bestaudio only
+    # Strategy 4: Try with bestaudio only
     elif yt-dlp -x --audio-format mp3 --audio-quality 0 --format "bestaudio" -o "$FULL_PATH" "$URL" 2>/dev/null; then
         echo "✅ Descarga exitosa con bestaudio"
-    # Strategy 4: Try with worst quality (most compatible)
-    elif yt-dlp -x --audio-format mp3 --audio-quality 0 --format "worst" -o "$FULL_PATH" "$URL" 2>/dev/null; then
-        echo "✅ Descarga exitosa con calidad mínima"
-    # Strategy 5: Try with SABR streaming workaround (no format selection)
+    # Strategy 5: Android client with bestaudio
+    elif yt-dlp -x --audio-format mp3 --audio-quality 0 --extractor-args "youtube:player_client=android" --format "bestaudio" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+        echo "✅ Descarga exitosa con cliente Android + bestaudio"
+    # Strategy 6: Try with SABR streaming workaround (no format selection)
     elif yt-dlp -x --audio-format mp3 --audio-quality 0 --extractor-args "youtube:formats=missing_pot" -o "$FULL_PATH" "$URL" 2>/dev/null; then
         echo "✅ Descarga exitosa con workaround SABR"
-    # Strategy 6: Last resort - try without format restrictions
+    # Strategy 7: Last resort - try without format restrictions
     elif yt-dlp -x --audio-format mp3 --audio-quality 0 --extractor-args "youtube:formats=missing_pot" --format "best" -o "$FULL_PATH" "$URL" 2>/dev/null; then
         echo "✅ Descarga exitosa con formato best y SABR workaround"
     else
@@ -295,7 +298,7 @@ print_block_1() {
   echo "  1) 🔮 Crea el listado:"
   echo "       · mala-pata \"10 de boogaloo underground\""
   echo "       · mala-pata \"3 canciones de Silvio Rodríguez\" \"nueva_trova\""
-  echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX'"
+  echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX' --genre salsa"
   echo ""
   echo "  2) 🔥 Enciende la llama → come-candela"
   echo "       (descarga todo lo que pediste)"
@@ -311,7 +314,7 @@ print_block_2() {
   echo "  1) ✨ Invoca tu lista:"
   echo "       · mala-pata \"20 guarachas picarescas\""
   echo "       · mala-pata \"2 canciones de Kraftwerk\" \"techno\""
-  echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX'"
+  echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX' --genre house"
   echo ""
   echo "  2) 🔥 Alimenta la llama → come-candela"
   echo "       (la música cruza portales y llega a tu disco)"
@@ -327,7 +330,7 @@ print_block_3() {
   echo "  1) 📡 Genera el manifiesto de tracks:"
   echo "       · mala-pata \"15 joyas de salsa dura\""
   echo "       · mala-pata \"4 canciones de Daft Punk\" \"house\""
-  echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX'"
+  echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX' --genre timba"
   echo ""
   echo "  2) ⚙️ Ejecuta el motor → come-candela"
   echo "       (la data cruda se transforma en .mp3)"
@@ -343,7 +346,7 @@ print_block_4() {
   echo "  1) ✏️ Escribe tu deseo:"
   echo "       · mala-pata \"5 timbas que revienten\""
   echo "       · mala-pata \"1 cancion de Leo Dan\" \"balada\""
-  echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX'"
+  echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX' --genre balada"
   echo ""
   echo "  2) 🔥 Prende la candela → come-candela"
   echo "       (los espíritus traen tus canciones)"
@@ -353,14 +356,19 @@ print_block_4() {
 }
 
 # Seleccionar una variante al azar y evitar imprimir bloques legacy más abajo
-_mpcc_rand=$((RANDOM % 4))
-case $_mpcc_rand in
-  0) print_block_1 ;;
-  1) print_block_2 ;;
-  2) print_block_3 ;;
-  3) print_block_4 ;;
-
-esac
+# Solo mostrar el mensaje si NO estamos siendo ejecutados desde pipeline
+if [ -z "${__MPCC_FROM_PIPELINE:-}" ]; then
+  _mpcc_rand=$((RANDOM % 4))
+  case $_mpcc_rand in
+    0) print_block_1 ;;
+    1) print_block_2 ;;
+    2) print_block_3 ;;
+    3) print_block_4 ;;
+  esac
+fi
 
 # Evitar imprimir mensajes legacy que siguen en el archivo
-return 0 2>/dev/null || true
+# Solo hacer return si NO estamos siendo ejecutados desde pipeline
+if [ -z "${__MPCC_FROM_PIPELINE:-}" ]; then
+  return 0 2>/dev/null || true
+fi

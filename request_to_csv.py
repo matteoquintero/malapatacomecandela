@@ -1651,7 +1651,7 @@ def write_csv(rows: List[Dict], path: str, direct_genre: str = None):
 
     # Determinar columnas según si hay género directo
     if direct_genre:
-        fieldnames = ["artist", "title", "query_override", "source", "gnere"]
+        fieldnames = ["artist", "title", "query_override", "source", "genre"]
     else:
         fieldnames = ["artist", "title", "query_override", "source"]
 
@@ -1666,7 +1666,7 @@ def write_csv(rows: List[Dict], path: str, direct_genre: str = None):
                 "source": r.get("source", "")
             }
             if direct_genre:
-                row_data["gnere"] = direct_genre
+                row_data["genre"] = direct_genre
             w.writerow(row_data)
 
 # ===== Runner =====

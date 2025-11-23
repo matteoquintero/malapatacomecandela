@@ -118,10 +118,10 @@ def fetch_playlist_tracks(sp, playlist_id: str, limit_count: int = None) -> List
     return items
 
 
-def write_csv(rows: List[Dict], out_path: str):
+def write_csv(rows: List[Dict], out_path: str, genre: str = None):
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(
-            f, fieldnames=["artist", "title", "query_override", "source"])
+            f, fieldnames=["artist", "title", "query_override", "source", "genre"])
         w.writeheader()
         for r in rows:
             artist_fmt = title_case_keep_caps(r["artist"])
@@ -132,7 +132,8 @@ def write_csv(rows: List[Dict], out_path: str):
                 "artist": artist_fmt,
                 "title": title_fmt,
                 "query_override": qov,
-                "source": "spotify"
+                "source": "spotify",
+                "genre": genre or ""
             })
 
 
@@ -143,6 +144,7 @@ def main():
     ap.add_argument("--out", default=os.path.join(PROJECT_DIR, "canciones.csv"),
                     help="CSV de salida (default: canciones.csv)")
     ap.add_argument("--count", type=int, help="Limitar a N canciones")
+    ap.add_argument("--genre", help="Género a asignar a todas las canciones (ej: salsa, house, balada)")
     args = ap.parse_args()
 
     sp = get_spotify_client()
@@ -161,8 +163,11 @@ def main():
         seen.add(k)
         rows.append(t)
 
-    write_csv(rows, args.out)
-    print(f"✅ CSV generado: {args.out}  ({len(rows)} temas)")
+    write_csv(rows, args.out, genre=args.genre)
+    if args.genre:
+        print(f"✅ CSV generado: {args.out}  ({len(rows)} temas) - Género: {args.genre}")
+    else:
+        print(f"✅ CSV generado: {args.out}  ({len(rows)} temas)")
     print("   Ejecuta ahora: come-candela")
 
 

@@ -14,7 +14,7 @@ help:
 	@echo "  lock          - congela versiones a requirements-freeze.txt"
 	@echo "  run-request   - ejemplo: make run-request ARGS='"10 canciones de salsa dura clasica"'"
 	@echo "  run-pipeline  - ejemplo: make run-pipeline IN=canciones.csv OUT=out/log_descargas.csv"
-	@echo "  run-spotify   - ejemplo: make run-spotify ARGS='https://open.spotify.com/playlist/XXXX --count 20'"
+	@echo "  run-spotify   - ejemplo: make run-spotify ARGS='https://open.spotify.com/playlist/XXXX --count 20 --genre salsa'"
 
 venv:
 	$(PY) -m venv $(VENV)

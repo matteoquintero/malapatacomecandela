@@ -1780,30 +1780,31 @@ def process_csv(input_csv: str, out_csv: str, dry_run: bool = False, image_type:
                     f"   💳 Cuota gastada en esta pista (antes de clasif/descarga): {per_track['quota_units']}u | llamadas: {per_track['api_calls']}")
 
                 # Verificar si hay género directo
-                direct_genre = (row.get("gnere") or "").strip()
+                direct_genre = (row.get("genre") or "").strip()
                 if direct_genre:
-                    print(f"   🎯 Bendición directa: {direct_genre}")
-                    # Mapear género directo a comando
-                    genre_to_command = {
-                        "balada": "dl-balada",
-                        "house": "dl-house",
-                        "nueva_trova": "dl-nueva-trova",
-                        "techno": "dl-techno",
-                        "dl-cumbia": "dl-cumbia"
-                    }
-                    if direct_genre not in genre_to_command:
-                        print(f"   ❌ Bendición desconocida: {direct_genre}")
+                    print(
+                        f"   🎯 Bendición directa: {direct_genre} (omitiendo análisis)")
+                    # Normalizar el género
+                    genre_slug = _norm_slug_name(direct_genre)
+
+                    # Verificar si el género existe en GENRE_COMMAND
+                    if genre_slug not in GENRE_COMMAND:
+                        print(
+                            f"   ❌ Bendición desconocida: {direct_genre} (normalizado: {genre_slug})")
+                        print(
+                            f"   📋 Géneros válidos: {', '.join(sorted(GENRE_COMMAND.keys()))}")
                         skipped += 1
                         continue
 
                     cls = {
-                        "slug": direct_genre,
+                        "slug": genre_slug,
                         "confidence": 1.0,
-                        "rationale": f"Género directo: {direct_genre}",
-                        "command": genre_to_command[direct_genre]
+                        "rationale": f"Género directo desde CSV: {direct_genre}",
+                        "command": GENRE_COMMAND[genre_slug]
                     }
                 else:
                     # Clasificar normalmente
+                    print("   🔍 Analizando género...")
                     cls = classify(best_meta)
                     print(f"   🎯 Dictamen final → {cls['slug']}")
 
