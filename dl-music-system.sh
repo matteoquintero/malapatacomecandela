@@ -7,6 +7,21 @@ if [ -n "${__MPCC_DL_MUSIC_LOADED:-}" ] && [ -z "${__MPCC_FROM_PIPELINE:-}" ]; t
 fi
 export __MPCC_DL_MUSIC_LOADED=1
 
+# ── Verificación única de yt-dlp al cargar el script ─────────────────────────
+if command -v yt-dlp >/dev/null 2>&1; then
+    _YTDLP_VERSION=$(yt-dlp --version 2>/dev/null)
+    if echo "$_YTDLP_VERSION" | grep -q "2024\|2025\|2026"; then
+        echo "   ✅ yt-dlp $_YTDLP_VERSION listo"
+    else
+        echo "   ⚠️  yt-dlp $_YTDLP_VERSION puede estar desactualizado"
+        echo "   💡 Actualiza con: pip install --upgrade yt-dlp"
+    fi
+else
+    echo "❌ yt-dlp no está instalado o no está en PATH"
+    echo "💡 Instala con: pip install yt-dlp"
+fi
+unset _YTDLP_VERSION
+
 # Sistema general para descargar música con metadatos
 # Función base que reemplaza todos los alias dl-*
 
@@ -47,29 +62,6 @@ dl_music() {
         echo "📍 Ejemplo: $GENERO \"atVS36nBgDw\" \"Héctor Lavoe\" \"El Cantante\" hq"
         echo "💡 Solo necesitas el ID del video, no la URL completa"
         echo "🖼️  Tipos de imagen: 'hq' (default) o 'max' (mejor calidad)"
-        return 1
-    fi
-
-    # Check if yt-dlp is up to date and working
-    if command -v yt-dlp >/dev/null 2>&1; then
-        echo "🔄 Verificando versión de yt-dlp..."
-        YTDLP_VERSION=$(yt-dlp --version 2>/dev/null)
-        if [ $? -eq 0 ]; then
-            echo "   Versión actual: $YTDLP_VERSION"
-            # Check if it's a recent version (basic check)
-            if echo "$YTDLP_VERSION" | grep -q "2024\|2025"; then
-                echo "   ✅ Versión parece actualizada"
-            else
-                echo "   ⚠️  Versión puede estar desactualizada"
-                echo "   💡 Considera actualizar: pip install --upgrade yt-dlp"
-            fi
-        else
-            echo "   ❌ yt-dlp no responde correctamente"
-            echo "   💡 Reinstala: pip install --upgrade yt-dlp"
-        fi
-    else
-        echo "❌ yt-dlp no está instalado o no está en PATH"
-        echo "💡 Instala con: pip install yt-dlp"
         return 1
     fi
 
@@ -299,6 +291,7 @@ print_block_1() {
   echo "       · mala-pata \"10 de boogaloo underground\""
   echo "       · mala-pata \"3 canciones de Silvio Rodríguez\" \"nueva_trova\""
   echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX' --genre salsa"
+  echo "       · mala-pata-spotify 'https://open.spotify.com/album/XXXX' --genre mambo"
   echo ""
   echo "  2) 🔥 Enciende la llama → come-candela"
   echo "       (descarga todo lo que pediste)"
@@ -315,6 +308,7 @@ print_block_2() {
   echo "       · mala-pata \"20 guarachas picarescas\""
   echo "       · mala-pata \"2 canciones de Kraftwerk\" \"techno\""
   echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX' --genre house"
+  echo "       · mala-pata-spotify 'https://open.spotify.com/album/XXXX' --genre boogaloo"
   echo ""
   echo "  2) 🔥 Alimenta la llama → come-candela"
   echo "       (la música cruza portales y llega a tu disco)"
@@ -331,6 +325,7 @@ print_block_3() {
   echo "       · mala-pata \"15 joyas de salsa dura\""
   echo "       · mala-pata \"4 canciones de Daft Punk\" \"house\""
   echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX' --genre timba"
+  echo "       · mala-pata-spotify 'https://open.spotify.com/album/XXXX' --genre son-cubano"
   echo ""
   echo "  2) ⚙️ Ejecuta el motor → come-candela"
   echo "       (la data cruda se transforma en .mp3)"
@@ -347,6 +342,7 @@ print_block_4() {
   echo "       · mala-pata \"5 timbas que revienten\""
   echo "       · mala-pata \"1 cancion de Leo Dan\" \"balada\""
   echo "       · mala-pata-spotify 'https://open.spotify.com/playlist/XXXX' --genre balada"
+  echo "       · mala-pata-spotify 'https://open.spotify.com/album/XXXX' --genre guaracha"
   echo ""
   echo "  2) 🔥 Prende la candela → come-candela"
   echo "       (los espíritus traen tus canciones)"

@@ -28,11 +28,11 @@ lock:
 	$(ACTIVATE) && $(PIP) freeze > requirements-freeze.txt
 
 run-request:
-	$(ACTIVATE) && $(PY) request_to_csv.py $(ARGS)
+	$(ACTIVATE) && $(PY) mala_pata.py create $(ARGS)
 
 run-pipeline:
 	$(ACTIVATE) && mkdir -p out
-	$(ACTIVATE) && $(PY) pipeline_music.py --input $(IN) --output $(OUT)
+	$(ACTIVATE) && $(PY) mala_pata.py download --input $(IN) --output $(OUT)
 
 run-spotify:
-	$(ACTIVATE) && $(PY) spotify_to_csv.py $(ARGS)
+	$(ACTIVATE) && $(PY) mala_pata.py create --spotify $(ARGS)

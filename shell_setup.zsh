@@ -50,10 +50,10 @@ else
 fi
 
 # Aliases de entrada/salida del pipeline usando el python detectado
-alias come-candela='$MPCC_PY "$MPCC_DIR/pipeline_music.py" --input "$MPCC_DIR/canciones.csv" --output "$MPCC_DIR/out/log_descargas.csv"'
-alias mala-pata='$MPCC_PY "$MPCC_DIR/request_to_csv.py"'
-alias mala-candela='$MPCC_PY "$MPCC_DIR/delete_song.py" --filename'
-alias mala-pata-spotify='$MPCC_PY "$MPCC_DIR/spotify_to_csv.py"'
+alias come-candela='$MPCC_PY "$MPCC_DIR/mala_pata.py" download'
+alias mala-pata='$MPCC_PY "$MPCC_DIR/mala_pata.py"'
+alias mala-candela='$MPCC_PY "$MPCC_DIR/mala_pata.py" delete --filename'
+alias mala-pata-spotify='$MPCC_PY "$MPCC_DIR/mala_pata.py" create --spotify'
 
 # Otros binarios del usuario
 export PATH="$HOME/.console-ninja/.bin:$PATH"

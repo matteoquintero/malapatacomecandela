@@ -263,7 +263,7 @@ def mb_search_release(artist, album):
 
 ### Propósito
 
-- Integración con playlists de Spotify
+- Integración con playlists y álbumes de Spotify
 - Extracción de metadatos de tracks
 - Autenticación OAuth2
 
@@ -292,6 +292,8 @@ auth = SpotifyOAuth(
 
 #### 2. Obtención de Tracks
 
+##### Playlists
+
 ```python
 def fetch_playlist_tracks(sp, playlist_id, limit_count=None):
     results = sp.playlist_items(
@@ -299,6 +301,15 @@ def fetch_playlist_tracks(sp, playlist_id, limit_count=None):
         fields="items(track(name,artists(name),album(name))),next",
         additional_types=["track"]
     )
+```
+
+##### Álbumes
+
+```python
+def fetch_album_tracks(sp, album_id, limit_count=None):
+    album = sp.album(album_id)
+    album_name = album.get("name", "")
+    results = sp.album_tracks(album_id, limit=50, offset=0)
 ```
 
 ### Parsing de URLs
@@ -309,6 +320,38 @@ def parse_playlist_id(s):
         part = s.split("open.spotify.com/playlist/")[1]
         return part.split("?")[0].split("/")[0]
     return s
+
+def parse_album_id(s):
+    if "open.spotify.com/album/" in s:
+        part = s.split("open.spotify.com/album/")[1]
+        return part.split("?")[0].split("/")[0]
+    return s
+```
+
+### Detección Automática (No Requiere --type)
+
+El sistema detecta automáticamente si una URL es de playlist o álbum **sin necesidad de especificar parámetros adicionales**:
+
+```python
+# Detección automática por presencia de "album" en la URL
+source_type = args.type  # Solo si el usuario lo especificó (opcional)
+if not source_type:
+    # Detección automática
+    if "album" in args.source or ":album:" in args.source:
+        source_type = "album"
+    else:
+        source_type = "playlist"
+```
+
+**Ejemplos:**
+
+```bash
+# Detecta automáticamente el tipo
+mala-pata create --spotify https://open.spotify.com/playlist/37i9dQZF1DX8S0uQvJ4gaa
+mala-pata create --spotify https://open.spotify.com/album/6s84u2TUpR3wdUv4NgKA2j
+
+# Forzar tipo y limitar canciones
+mala-pata create --spotify URL --type album --count 10 --genre mambo
 ```
 
 ## 6. yt-dlp (Sin API)

@@ -1,155 +1,110 @@
 # Mala Pata Come Candela – Sistema de música
 
-Genera `canciones.csv` a partir de pedidos en lenguaje natural o playlists de Spotify, y luego resuelve video/ID en YouTube, clasifica en 16 géneros afrolatinos y descarga el audio con metadatos.
+Genera `canciones.csv` a partir de pedidos en lenguaje natural o playlists de Spotify, busca ID en YouTube, clasifica en 16 géneros afrolatinos y descarga el audio con metadatos.
 
 ## Estructura
 
-- `request_to_csv.py`: genera `canciones.csv` desde un pedido natural (Discogs + MusicBrainz + opcional OpenAI).
-- `spotify_to_csv.py`: exporta una playlist de Spotify a `canciones.csv`.
-- `pipeline_music.py`: procesa el CSV → busca ID YouTube (API o yt-dlp) → clasifica → descarga con `dl-music-system.sh`.
-- `delete_song.py`: elimina canción y fila asociada del manifest, con búsqueda por nombre de archivo.
-- `dl-music-system.sh`: funciones de descarga por género y agregado de metadatos/thumbnail.
+```
+mpc/                     # Paquete principal
+  catalog/genres.py      # Única fuente de verdad de géneros
+  planner/               # Interpretación de pedidos (intent + LLM)
+  sources/               # Clientes API: Discogs, MusicBrainz, Spotify, OpenAI
+  builders/              # Construcción de playlists y álbumes
+  utils/                 # text.py, csv_io.py
+  config.py              # Config desde .env
+  cli.py                 # CLI unificado (subcomandos)
+
+mala_pata.py             # Entry point: mala-pata create/download/delete/list/genres
+pipeline_music.py        # Pipeline de descarga (YouTube → CLASSIFY → dl)
+dl-music-system.sh       # Descarga por género con metadatos/thumbnail
+delete_song.py           # Elimina canción del manifest y disco
+```
 
 ## Requisitos
 
-- Python 3.10+ recomendado
-- `ffmpeg` y `yt-dlp` instalados en el sistema
-- (Opcional) API keys: YouTube Data API v3, OpenAI; token Discogs; credenciales Spotify
+- Python 3.10+
+- `ffmpeg` y `yt-dlp` en PATH
+- (Opcional) API keys: YouTube Data v3, OpenAI; token Discogs; credenciales Spotify
 
 ## Instalación
-
-1. Crear entorno y instalar dependencias:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
 pip install -r requirements.txt
-```
-
-1. Copiar variables de entorno y editar rutas/API keys:
-
-```bash
-cp env.example .env
-```
-
-1. Ajustar permisos del script de descarga:
-
-```bash
+cp env.example .env        # editar rutas y API keys
 chmod +x dl-music-system.sh
+source shell_setup.zsh     # cargar aliases (en .zshrc o a mano)
+```
+
+## Uso rápido
+
+```bash
+# Generar lista desde lenguaje natural
+mala-pata create "10 canciones de salsa dura underground"
+mala-pata create "5 de Héctor Lavoe"
+mala-pata create --artist "Ray Barretto" -n 8
+
+# Desde Spotify
+mala-pata create --spotify https://open.spotify.com/playlist/XXXX
+
+# Ver el plan sin ejecutar
+mala-pata create "10 mambos comerciales" --dry-run
+
+# Descargar
+mala-pata download          # ≡ come-candela
+
+# Borrar una canción
+mala-pata delete --filename "NG La Banda - Santa Palabra.mp3"
+
+# Utilidades
+mala-pata list
+mala-pata genres
 ```
 
 ## Configuración (.env)
 
-Variables principales:
+| Variable | Descripción |
+|---|---|
+| `LIB_BASE_DIR` | Base de tu librería de música |
+| `DL_MUSIC_SCRIPT` | Ruta a `dl-music-system.sh` |
+| `MANIFEST_FILE` | Registro de descargas |
+| `SEARCH_MODE` | `no_api_first` \| `api_first` \| `no_api_only` \| `api_only` |
+| `CLASSIFIER_MODE` | `LLM_FALLBACK` \| `HEURISTIC_ONLY` \| `LLM_ONLY` |
+| `OPENAI_API_KEY` | Opcional — mejora planner y clasificador |
+| `YOUTUBE_API_KEY` | Opcional — búsquedas más precisas |
+| `DISCOGS_TOKEN` | Opcional — mejores resultados en create |
+| `SPOTIFY_*` | Opcional — importar playlists/álbumes |
 
-- `DL_MUSIC_SCRIPT`: ruta al `dl-music-system.sh`.
-- `LIB_BASE_DIR`: base de tu librería de música.
-- `MANIFEST_FILE`: ruta del manifest (por defecto dentro del proyecto).
-- `SEARCH_MODE`: `no_api_first` | `api_first` | `no_api_only` | `api_only`.
-- `NOAPI_SOURCES`: `ytsearch,scsearch`.
-- `YOUTUBE_API_KEY` (opcional): activa búsquedas vía API.
-- `OPENAI_API_KEY` (opcional) y `OPENAI_MODEL`.
-- `DISCOGS_TOKEN` (opcional): mejora resultados.
-- `SPOTIFY_*` (para `spotify_to_csv.py`).
+Sin `YOUTUBE_API_KEY` el sistema usa yt-dlp (`SEARCH_MODE=no_api_first`).
+Sin `OPENAI_API_KEY` usa el planner heurístico y `CLASSIFIER_MODE=HEURISTIC_ONLY`.
 
-Cachés por defecto (locales al proyecto):
+## Aliases disponibles (shell_setup.zsh)
 
-- `CHANNEL_CACHE_FILE`: `.cache/yt_channel_cache.json`
-- `SEARCH_CACHE_FILE`: `.cache/yt_search_cache.json`
+| Alias | Comando |
+|---|---|
+| `mala-pata` | `mala_pata.py` |
+| `come-candela` | `mala-pata download` |
+| `mala-candela` | `mala-pata delete --filename` |
+| `mala-pata-spotify` | `mala-pata create --spotify` |
 
-## Uso rápido
+## Problemas comunes
 
-- Generar CSV desde pedido natural:
-
+**Errores SABR / "format not available":**
 ```bash
-source .venv/bin/activate
-python request_to_csv.py "10 canciones de salsa dura clasica underground"
+./test_sabr_streaming.sh VIDEO_ID
+pip install --upgrade yt-dlp
 ```
 
-- Generar CSV desde playlist de Spotify:
-
+**Sin cuota YouTube:**
 ```bash
-python spotify_to_csv.py https://open.spotify.com/playlist/XXXXXXXX --count 20
+./configure_no_api.sh
+# o manualmente: SEARCH_MODE=no_api_only en .env
 ```
 
-- Ejecutar pipeline (descarga):
+## Documentación
 
-```bash
-python pipeline_music.py --input canciones.csv --output out/log_descargas.csv
-```
-
-- Borrar una canción por filename o por artist/title:
-
-```bash
-python delete_song.py --filename "NG La Banda - Santa Palabra.mp3" --all
-# o
-python delete_song.py --artist "NG La Banda" --title "Santa Palabra"
-```
-
-## Notas de clasificación
-
-- Modo `LLM_FALLBACK`: usa heurística y recurre a LLM si hace falta.
-- Para forzar solo heurística: `CLASSIFIER_MODE=HEURISTIC_ONLY`.
-- Para solo LLM: `CLASSIFIER_MODE=LLM_ONLY` (requiere `OPENAI_API_KEY`).
-
-## Consejos y solución de problemas
-
-- Si no tienes `YOUTUBE_API_KEY`, el sistema usa `yt-dlp` (`SEARCH_MODE=no_api_first`).
-- Asegúrate de tener `ffmpeg` y `yt-dlp` en PATH.
-- Si no descarga la miniatura, el MP3 se guarda igual con metadatos básicos.
-- Si el manifest no existe, se crea automáticamente en `<proyecto>/manifest.csv` (puedes cambiarlo con `MANIFEST_FILE`).
-- Discogs y MusicBrainz tienen límites; el código respeta pausas para ser amable.
-
-### Problemas de SABR streaming (YouTube)
-
-Si encuentras errores como "Requested format is not available" o "Only images are available for download":
-
-1. **Diagnosticar el problema:**
-
-   ```bash
-   ./test_sabr_streaming.sh VIDEO_ID
-   ```
-
-2. **Actualizar yt-dlp:**
-
-   ```bash
-   pip install --upgrade yt-dlp
-   # o para versión nightly:
-   pip install --upgrade yt-dlp-nightly
-   ```
-
-3. **El sistema ahora incluye múltiples estrategias de descarga** para manejar automáticamente los problemas de SABR streaming.
-
-4. **Para más información:** [GitHub issue #12482](https://github.com/yt-dlp/yt-dlp/issues/12482)
-
-### Evitar gastar cuota de YouTube API
-
-Si quieres usar SOLO métodos sin API (yt-dlp) y evitar gastar cuota:
-
-1. **Configuración rápida:**
-
-   ```bash
-   ./configure_no_api.sh
-   ```
-
-2. **Configuración manual en .env:**
-
-   ```bash
-   SEARCH_MODE=no_api_only
-   DISABLE_API_FALLBACK=true
-   #YOUTUBE_API_KEY=  # Comentar esta línea
-   ```
-
-3. **Con debug activado para ver qué está pasando:**
-   ```bash
-   DEBUG_MODE=true python pipeline_music.py --input canciones.csv
-   ```
-
-## Desarrollo
-
-- Formato CSV esperado por el pipeline: columnas `artist,title,query_override,source`.
-- `query_override` puede incluir un `VIDEO_ID` o URL de YouTube; si contiene ID válido, se usa directo.
+Ver `documentation/` para referencia completa de APIs, flujos y ejemplos.
 
 ## Licencia
 

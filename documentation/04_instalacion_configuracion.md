@@ -179,6 +179,14 @@ done
 ```
 malapatacomecandela_system/
 ├── .venv/                    # Entorno virtual
+├── mpc/                      # Paquete principal
+│   ├── catalog/genres.py    # Datos de géneros (única fuente)
+│   ├── planner/             # Interpretación de pedidos
+│   ├── sources/             # Clientes API (Discogs, MB, Spotify, OpenAI)
+│   ├── builders/            # Construcción de listas
+│   ├── utils/               # text.py, csv_io.py
+│   ├── config.py            # Config desde .env
+│   └── cli.py               # CLI unificado
 ├── cache/                    # Cachés del sistema
 │   ├── manifest.csv         # Registro de descargas
 │   ├── yt_channel_cache.json
@@ -186,9 +194,11 @@ malapatacomecandela_system/
 │   └── spotify_token_cache
 ├── out/                     # Logs de procesamiento
 ├── documentation/           # Documentación
+├── mala_pata.py             # Entry point principal
+├── pipeline_music.py        # Pipeline de descarga
+├── dl-music-system.sh       # Descarga por género
 ├── .env                     # Configuración
-├── requirements.txt         # Dependencias
-└── [archivos Python]       # Código fuente
+└── requirements.txt         # Dependencias
 ```
 
 ## Configuración de APIs
@@ -342,19 +352,11 @@ chmod +x verify_installation.sh
 
 #### Agregar Nuevo Género
 
-```python
-# En pipeline_music.py, agregar a GENRE_COMMAND
-GENRE_COMMAND["nuevo_genero"] = "dl-nuevo-genero"
+Ver guía completa: [06_agregar_genero_nuevo.md](06_agregar_genero_nuevo.md)
 
-# En dl-music-system.sh, agregar función
-dl-nuevo-genero() { dl_music "dl-nuevo-genero" "$@"; }
-
-# Agregar mapeo de directorio
-case $GENERO in
-    "dl-nuevo-genero") GENRE_DIR="nuevo_genero" ;;
-    # ... otros géneros
-esac
-```
+Resumen — solo 2 archivos:
+1. `mpc/catalog/genres.py` — agregar a `GENRE_COMMAND` y `GENRE_DB`
+2. `dl-music-system.sh` — agregar mapeo `"dl-nombre") GENRE_DIR="nombre" ;;`
 
 ### Configuración de Caché
 

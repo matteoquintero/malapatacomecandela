@@ -1,5 +1,11 @@
 # pipeline_music.py
 # -*- coding: utf-8 -*-
+# ─── mpc imports ────────────────────────────────────────────────────────────
+import sys as _sys
+import os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from mpc.catalog.genres import GENRE_DB, GENRE_COMMAND, ALL_SLUGS  # noqa: E402
+# ────────────────────────────────────────────────────────────────────────────
 """
 Pipeline CSV -> (YouTube ID via override o búsqueda) -> Clasificación 16 géneros -> Descarga
 - Dedupe por manifest (artist|title) y por librería (archivos existentes)
@@ -226,32 +232,7 @@ def norm_key(artist: str, title: str) -> str:
     return f"{_simp_text(artist)}|{_simp_text(title)}"
 
 
-# ========= Generos / comandos =========
-GENRE_COMMAND: Dict[str, str] = {
-    "son_cubano": "dl-son-cubano",
-    "guajira_moderna": "dl-guajira-moderna",
-    "guaracha": "dl-guaracha",
-    "rumba_guaguanco": "dl-rumba-guaguanco",
-    "afro_cuban_jazz_descarga": "dl-afro-cuban-jazz",
-    "mambo": "dl-mambo",
-    "cha_cha_cha": "dl-cha-cha-cha",
-    "boogaloo": "dl-boogaloo",
-    "salsa_dura_clasica": "dl-salsa-dura-clasica",
-    "guaguanco_fusionado": "dl-guaguanco-fusionado",
-    "exotica": "dl-exotica",
-    "latin_soul": "dl-latin-soul",
-    "plena_bomba": "dl-plena-bomba",
-    "salsa_romantica": "dl-salsa-romantica",
-    "timba": "dl-timba",
-    "salsa_dura_revival": "dl-salsa-dura-revival",
-    # Géneros directos
-    "balada": "dl-balada",
-    "house": "dl-house",
-    "nueva_trova": "dl-nueva-trova",
-    "techno": "dl-techno",
-    "cumbia": "dl-cumbia",
-}
-ALL_SLUGS: List[str] = list(GENRE_COMMAND.keys())
+# GENRE_COMMAND y ALL_SLUGS importados desde mpc.catalog.genres (ver arriba)
 
 
 def _norm_slug_name(s: str) -> str:
@@ -262,41 +243,7 @@ def _norm_slug_name(s: str) -> str:
     return s
 
 
-# ========= Base rica (resumen) =========
-GENRE_DB: List[Dict] = [
-    {"name": "Son Cubano", "aliases": ["Son", "Son Montuno (genérico)"], "artists_key": ["Trío Matamoros", "Arsenio Rodríguez", "Septeto Nacional", "Ignacio Piñeiro", "Compay Segundo", "Eliades Ochoa"], "rhythm_traits": ["tumbao de bajo caminante", "montuno", "llamada y respuesta"], "instrumentation": {
-        "core": ["tres cubano", "guitarra", "piano", "bongó", "maracas", "claves", "contrabajo", "trompeta"], "optional": ["conga", "flauta", "violín"]}, "signature_tracks": ["Lágrimas Negras", "Échale Salsita", "Bruca Maniguá"], "negative": ["salsa romantica", "bachata", "reggaeton"]},
-    {"name": "Guajira Moderna", "aliases": ["Guajira Son", "Son Montuno Lento"], "artists_key": ["Guillermo Portabales", "Compay Segundo", "Eliades Ochoa"], "rhythm_traits": ["tumbao suave", "énfasis melódico y poético"], "instrumentation": {
-        "core": ["tres", "guitarra", "bongó", "maracas", "contrabajo", "claves"], "optional": ["flauta", "violín"]}, "signature_tracks": ["El Carretero", "Chan Chan", "Rico Vacilón"], "negative": ["mambo explosivo", "guaracha rapida", "salsa romantica"]},
-    {"name": "Guaracha", "aliases": [], "artists_key": ["Beny Moré", "Celia Cruz", "Ñico Saquito", "Sonora Matancera"], "rhythm_traits": ["coros rápidos", "soneo juguetón", "doble sentido"], "instrumentation": {"core": ["tres", "guitarra",
-                                                                                                                                                                                                                            "piano", "bongó", "maracas", "claves", "contrabajo", "trompeta"], "optional": ["conga", "saxofón"]}, "signature_tracks": ["Cuidadito Compay Gallo", "María Cristina", "Francisco Guayabal"], "negative": ["balada", "romantica"]},
-    {"name": "Rumba Guaguancó", "aliases": ["Guaguancó"], "artists_key": ["Los Muñequitos de Matanzas", "Yoruba Andabo", "Clave y Guaguancó", "Los Papines"], "rhythm_traits": ["polirritmia", "quinto improvisador", "vacunao"], "instrumentation": {
-        "core": ["quinto", "tres golpes", "tumba", "claves", "guagua", "voz", "coro"], "optional": ["chekeré", "palmas"]}, "signature_tracks": ["Rumba pa' los rumberos"], "negative": ["mambo big band", "metales salsa pesados"]},
-    {"name": "Afro Cuban Jazz Descarga", "aliases": ["Afro-Cuban Jazz", "Latin Jazz (clásico)", "Descarga"], "artists_key": ["Machito", "Mario Bauzá", "Tito Puente", "Cachao", "Mongo Santamaría", "Cal Tjader", "Dizzy Gillespie"], "rhythm_traits": ["tema–solos–tema", "descarga"], "instrumentation": {
-        "core": ["piano", "bajo", "contrabajo", "congas", "timbales", "bongó", "metales", "saxos"], "optional": ["batá", "flauta", "vibráfono"]}, "signature_tracks": ["Tanga", "Manteca", "Afro Blue", "Descarga Cachao"], "negative": ["balada", "romantica"]},
-    {"name": "Mambo", "aliases": [], "artists_key": ["Pérez Prado", "Tito Puente", "Machito"], "rhythm_traits": ["síncopas cortantes", "breaks de metales", "mambos instrumentales"], "instrumentation": {
-        "core": ["piano", "bajo", "congas", "timbales", "bongó", "trompetas", "trombones", "saxofones"]}, "signature_tracks": ["Mambo No. 5", "Ran Kan Kan", "Mambo Inn"], "negative": ["charanga pura"]},
-    {"name": "Cha Cha Cha", "aliases": ["Chachachá", "Cha-cha-cha"], "artists_key": ["Orquesta América", "Orquesta Aragón", "José Fajardo", "Enrique Jorrín"], "rhythm_traits": ["1–2–cha-cha-chá", "charanga"], "instrumentation": {
-        "core": ["flauta", "violines", "fondo piano/contrabajo", "timbales", "güiro", "maracas"]}, "signature_tracks": ["La Engañadora", "Me lo Dijo Adela", "El Bodeguero"], "negative": ["trombones pesados 70s"]},
-    {"name": "Boogaloo", "aliases": ["Latin Boogaloo", "Bugalú"], "artists_key": ["Pete Rodríguez", "Joe Cuba", "Johnny Colón", "Ray Barretto"], "rhythm_traits": ["groove soul", "spanglish", "shing-a-ling", "watusi"], "instrumentation": {
-        "core": ["órgano", "piano", "bajo eléctrico", "congas", "timbales", "bongó", "metales"]}, "signature_tracks": ["I Like It Like That", "Bang Bang", "Boogaloo Blues"], "negative": ["latin soul balada suave"]},
-    {"name": "Salsa Dura Clásica", "aliases": ["Salsa Brava", "Salsa 70s"], "artists_key": ["Willie Colón", "Héctor Lavoe", "Rubén Blades", "Ray Barretto", "Eddie Palmieri", "Fania All Stars", "Sonora Ponceña", "Raphy Leavitt"], "rhythm_traits": [
-        "coro–soneo intenso", "mambos de metales", "descargas", "montuno"], "instrumentation": {"core": ["piano", "bajo", "congas", "bongó", "timbales", "trombones", "trompetas", "coros"]}, "signature_tracks": ["Aguanile", "Plástico", "Indestructible", "Quítate Tú"], "negative": ["romantica", "erotica"]},
-    {"name": "Guaguancó Fusionado", "aliases": [], "artists_key": ["Eddie Palmieri", "Irakere", "Batacumbele", "Los Van Van"], "rhythm_traits": ["toque rumbero en salsa", "bloques rumberos"],
-        "instrumentation": {"core": ["congas/quinto", "piano", "bajo", "metales", "coros"], "optional": ["batá"]}, "signature_tracks": ["Plástico (intro rumbera)"], "negative": ["puro folklor sin orquesta"]},
-    {"name": "Exotica", "aliases": [], "artists_key": ["Martin Denny", "Les Baxter", "Yma Sumac", "Arthur Lyman"], "rhythm_traits": ["atmósfera cinematográfica", "selva", "vibráfono"],
-        "instrumentation": {"core": ["percusión suave", "marimba/vibráfono", "cuerdas", "flautas"]}, "signature_tracks": ["Quiet Village", "Taboo"], "negative": ["salsa dura", "boogaloo"]},
-    {"name": "Latin Soul", "aliases": [], "artists_key": ["Joe Bataan", "Ralfi Pagán", "Harvey Averne", "Malo"], "rhythm_traits": ["balada soul con conga", "órgano", "doo-wop"], "instrumentation": {"core": ["voz soul",
-                                                                                                                                                                                                               "órgano/guitarra", "bajo", "batería", "conga/bongó"], "optional": ["metales suaves"]}, "signature_tracks": ["Ordinary Guy", "Gypsy Woman", "I'm Your Puppet"], "negative": ["boogaloo shing a ling explosivo"]},
-    {"name": "Plena Bomba", "aliases": ["Plena", "Bomba"], "artists_key": ["Rafael Cortijo", "Ismael Rivera", "Pleneros de la 21", "Viento de Agua"], "rhythm_traits": ["llamada-respuesta", "panderetas", "barriles"],
-        "instrumentation": {"core": ["panderetas y güiro", "barriles", "maraca", "cuá"]}, "signature_tracks": ["Maquinolandera", "El Bombón de Elena"], "negative": ["metales pesados salsa (si no es fusión)"]},
-    {"name": "Salsa Romántica", "aliases": ["Salsa sensual", "Salsa erótica"], "artists_key": ["Lalo Rodríguez", "Frankie Ruiz", "Eddie Santiago", "Gilberto Santa Rosa", "Jerry Rivera", "Luis Enrique"], "rhythm_traits": ["coro emotivo", "menos agresividad percusiva", "producción pulida"], "instrumentation": {
-        "core": ["piano", "bajo", "congas/bongó/timbales suaves", "metales contenidos", "voz protagonista"], "optional": ["sintetizadores"]}, "signature_tracks": ["Ven Devórame Otra Vez", "Desnúdate Mujer", "Amores Como el Nuestro"], "negative": ["trombones agresivos 70s", "soneo largo"]},
-    {"name": "Timba", "aliases": [], "artists_key": ["NG La Banda", "Los Van Van", "Charanga Habanera", "Pupy y Los Que Son Son", "Manolín"], "rhythm_traits": ["bloqueos y cortes", "bajo protagónico", "cambios súbitos"], "instrumentation": {
-        "core": ["piano", "bajo eléctrico", "batería", "congas", "timbales", "metales", "coros"], "optional": ["teclados"]}, "signature_tracks": ["Te Pone la Cabeza Mala", "La Habana Me Llama"], "negative": ["boogaloo", "salsa romantica"]},
-    {"name": "Salsa Dura Revival", "aliases": ["Neosalsa", "Salsa dura moderna"], "artists_key": ["La-33", "Spanish Harlem Orchestra", "La Excelencia", "El Macabeo", "La Mambanegra", "Tromboranga", "Los Hacheros"], "rhythm_traits": [
-        "mambos pesados", "soneo vivo", "producción nítida"], "instrumentation": {"core": ["piano", "bajo", "congas/bongó/timbales", "trombones/trompetas", "coros fuertes"]}, "signature_tracks": ["La Pantera Mambo", "Salsa Dura"], "negative": ["romantica noventera"]},
-]
+# GENRE_DB importado desde mpc.catalog.genres (ver arriba)
 
 
 def _derive_heuristics():
