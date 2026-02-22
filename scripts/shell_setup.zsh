@@ -29,16 +29,14 @@ alias dl-salsa-romantica="yt-dlp -x --audio-format mp3 -o \"$MUSIC_BASE/salsa_ro
 alias dl-timba="yt-dlp -x --audio-format mp3 -o \"$MUSIC_BASE/timba/%(title)s.%(ext)s\""
 alias dl-salsa-dura-revival="yt-dlp -x --audio-format mp3 -o \"$MUSIC_BASE/salsa_dura_revival/%(title)s.%(ext)s\""
 
-# Cargar funciones de descarga por género
-if [ -f "$HOME/malapatacomecandela_system/dl-music-system.sh" ]; then
-  # si el usuario movió el repo a ~
-  source "$HOME/malapatacomecandela_system/dl-music-system.sh"
+# Cargar funciones de descarga por género (dl-music-system.sh está en scripts/)
+if [ -f "$HOME/malapatacomecandela_system/scripts/dl-music-system.sh" ]; then
+  source "$HOME/malapatacomecandela_system/scripts/dl-music-system.sh"
 elif [ -f "$(dirname ${BASH_SOURCE[0]:-${(%):-%x}})/dl-music-system.sh" ]; then
-  # ruta relativa a este archivo
+  # ruta relativa: shell_setup.zsh y dl-music-system.sh están en el mismo directorio (scripts/)
   source "$(dirname ${BASH_SOURCE[0]:-${(%):-%x}})/dl-music-system.sh"
-elif [ -f "/Users/matteoquintero/malapatacomecandela_system/dl-music-system.sh" ]; then
-  # fallback a ruta fija provista
-  source "/Users/matteoquintero/malapatacomecandela_system/dl-music-system.sh"
+elif [ -f "/Users/matteoquintero/malapatacomecandela_system/scripts/dl-music-system.sh" ]; then
+  source "/Users/matteoquintero/malapatacomecandela_system/scripts/dl-music-system.sh"
 fi
 
 # Detectar python del venv del proyecto si existe

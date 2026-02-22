@@ -62,6 +62,7 @@ def cmd_create(args: argparse.Namespace):
     # ── Inicializar clientes ──────────────────────────────────────────────────
     openai_client, openai_model = get_openai_client(cfg.openai_api_key, cfg.openai_model)
     discogs_client = get_discogs_client(cfg.discogs_token)
+    sp_creds = get_spotify_client_credentials(cfg.spotify_client_id, cfg.spotify_client_secret)
 
     # ── Modo Spotify ──────────────────────────────────────────────────────────
     if args.spotify:
@@ -148,7 +149,9 @@ def cmd_create(args: argparse.Namespace):
         return
 
     # ── Construir lista ────────────────────────────────────────────────────────
+    import time as _time
     rows: List = []
+    _t_build = _time.time()
 
     if plan["task"] == "album" and plan.get("artist") and plan.get("album"):
         print(f"📜 Buscando: {plan['artist']} — {plan['album']}")
@@ -170,11 +173,12 @@ def cmd_create(args: argparse.Namespace):
             print(f"🎶 Playlist de género: {g}  ({count} temas, {substyle or 'aleatorio'})")
             rows = pick_playlist(discogs_client, g, substyle, count)
 
+    _build_secs = _time.time() - _t_build
+
     # ── Fallback si no hay resultados ─────────────────────────────────────────
     if not rows and plan.get("artist"):
         print("🔍 No encontrado en MB/Discogs, buscando en Spotify…")
-        sp = get_spotify_client_credentials(cfg.spotify_client_id, cfg.spotify_client_secret)
-        rows = search_artist_tracks(sp, plan["artist"],
+        rows = search_artist_tracks(sp_creds, plan["artist"],
                                     int(plan.get("count") or 10), plan.get("genre"))
 
     if not rows and plan.get("artist"):
@@ -214,14 +218,16 @@ def cmd_create(args: argparse.Namespace):
     n = len(final)
     print(f"\n📜 El grimorio quedó {mode_str}: {os.path.basename(out_path)}  "
           f"({n} sello{'s' if n != 1 else ''} inscrito{'s' if n != 1 else ''})")
+    print(f"   Tiempo de búsqueda: {_build_secs:.1f}s")
     print("🔥 Para desatar la llama: mala-pata download\n")
 
-    # Mostrar resumen de fuentes
+    # Resumen de fuentes
     from collections import Counter
     sources = Counter(r.get("source", "?") for r in final)
     print("   Fuentes:")
     for src, cnt_src in sorted(sources.items(), key=lambda x: -x[1]):
-        print(f"     {src}: {cnt_src}")
+        bar = "█" * min(cnt_src, 20)
+        print(f"     {src:<15} {cnt_src:>3}  {bar}")
     print()
 
 
@@ -317,7 +323,7 @@ def cmd_download(args: argparse.Namespace):
     print(f"   Output: {output_csv}")
 
     py = sys.executable
-    pipeline_script = str(PROJECT_DIR / "pipeline_music.py")
+    pipeline_script = str(PROJECT_DIR / "scripts" / "pipeline_music.py")
 
     cmd = [py, pipeline_script, "--input", input_csv, "--output", output_csv]
     if args.dry_run:
@@ -338,7 +344,7 @@ def cmd_download(args: argparse.Namespace):
 def cmd_delete(args: argparse.Namespace):
     """Elimina una canción del manifest y del disco."""
     py = sys.executable
-    delete_script = str(PROJECT_DIR / "delete_song.py")
+    delete_script = str(PROJECT_DIR / "scripts" / "delete_song.py")
     cmd = [py, delete_script]
     if args.filename:
         cmd += ["--filename", args.filename]

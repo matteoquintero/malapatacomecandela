@@ -22,7 +22,12 @@ def get_spotify_client_credentials(client_id: str, client_secret: str):
     try:
         import spotipy
         from spotipy.oauth2 import SpotifyClientCredentials
-        auth = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+        from spotipy.cache_handler import MemoryCacheHandler
+        auth = SpotifyClientCredentials(
+            client_id=client_id,
+            client_secret=client_secret,
+            cache_handler=MemoryCacheHandler(),
+        )
         sp = spotipy.Spotify(client_credentials_manager=auth)
         logger.debug("Spotify (credentials) client OK")
         return sp
@@ -214,3 +219,5 @@ def _artist_matches(search_artist: str, track_artists: List[str]) -> bool:
 def _normalize_name(name: str) -> str:
     articles = {"la", "el", "los", "las", "le", "les", "un", "una", "de", "del", "y", "&"}
     return "".join(w for w in name.split() if w not in articles)
+
+

@@ -1,17 +1,21 @@
 # mpc/builders/playlist.py
 # -*- coding: utf-8 -*-
 """
-Construye listas de canciones desde Discogs + MusicBrainz + Backfill.
-No llama APIs de YouTube ni OpenAI. No genera canciones ficticias.
+Construye listas de canciones desde Discogs + MusicBrainz con fallback a Spotify y Last.fm.
+- Discogs y MusicBrainz se consultan en paralelo (ThreadPoolExecutor).
+- Si faltan canciones, Spotify y Last.fm se consultan en paralelo como fallback.
+- No llama APIs de YouTube ni OpenAI. No genera canciones ficticias.
 """
 
 import logging
 import random
-from typing import List, Dict, Optional, Set
+import time
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Dict, Optional, Set, Tuple
 
 from mpc.utils.text import simp, key_pair
 from mpc.catalog.genres import (
-    GENRE_RULES, ANCHOR_ARTISTS, BACKFILL, DISCOGS_STYLE_MAP
+    GENRE_RULES, ANCHOR_ARTISTS, DISCOGS_STYLE_MAP
 )
 import mpc.sources.musicbrainz as mb_client
 import mpc.sources.discogs as dc_client
@@ -34,6 +38,24 @@ def add_unique(rows: List[Dict], seen: Set[str], artist: str, title: str,
     return False
 
 
+# ── Helpers internos para paralelizar ────────────────────────────────────────
+
+def _fetch_discogs(
+    discogs_client, key: str, anchors: List[str], rule: Dict
+) -> Tuple[List[Dict], List[Dict]]:
+    dc_base = dc_client.search_by_rule(discogs_client, key, DISCOGS_STYLE_MAP, rule, limit=180)
+    dc_anch = dc_client.search_by_anchors(discogs_client, key, anchors, rule, limit_each=30) if anchors else []
+    return dc_base, dc_anch
+
+
+def _fetch_mb(key: str, rule: Dict, anchors: List[str]) -> Tuple[List[Dict], List[Dict]]:
+    mb_base = mb_client.search_by_rule(key, rule, limit=160)
+    mb_anch = mb_client.search_by_anchors(key, rule, anchors, limit_each=30) if anchors else []
+    return mb_base, mb_anch
+
+
+# ── Funciones públicas ────────────────────────────────────────────────────────
+
 def pick_playlist(
     discogs_client,
     genre: str,
@@ -42,7 +64,7 @@ def pick_playlist(
 ) -> List[Dict]:
     """
     Construye una playlist para el género dado.
-    Orden de fuentes: Discogs (prioridad) → MusicBrainz → Backfill canónico.
+    Discogs y MusicBrainz se consultan en paralelo.
     substyle: 'underground' | 'comercial' | None
     """
     key = genre.lower().strip().replace("-", "_").replace(" ", "_")
@@ -57,26 +79,30 @@ def pick_playlist(
     def is_anchor(artist: str) -> bool:
         return simp(artist) in anchor_set
 
-    # 1) Discogs
-    dc_base = dc_client.search_by_rule(discogs_client, key, DISCOGS_STYLE_MAP, rule, limit=180)
-    dc_anch = dc_client.search_by_anchors(discogs_client, key, anchors, rule, limit_each=30) if anchors else []
+    # ── Discogs + MusicBrainz en paralelo ────────────────────────────────────
+    t0 = time.time()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_dc = pool.submit(_fetch_discogs, discogs_client, key, anchors, rule)
+        f_mb = pool.submit(_fetch_mb, key, rule, anchors)
+        dc_base, dc_anch = f_dc.result()
+        mb_base, mb_anch = f_mb.result()
 
-    # 2) MusicBrainz
-    mb_base = mb_client.search_by_rule(key, rule, limit=160)
-    mb_anch = mb_client.search_by_anchors(key, rule, anchors, limit_each=30) if anchors else []
-
+    elapsed = time.time() - t0
     logger.debug(
-        "pick_playlist sources: dc_base=%d dc_anch=%d mb_base=%d mb_anch=%d",
-        len(dc_base), len(dc_anch), len(mb_base), len(mb_anch),
+        "pick_playlist sources (%.1fs): dc_base=%d dc_anch=%d mb_base=%d mb_anch=%d",
+        elapsed, len(dc_base), len(dc_anch), len(mb_base), len(mb_anch),
     )
 
-    pool = dc_base + dc_anch + mb_base + mb_anch
+    pool_total = len(dc_base) + len(dc_anch) + len(mb_base) + len(mb_anch)
+    logger.info("   Pool total: %d candidatos en %.1fs", pool_total, elapsed)
+
+    pool_all = dc_base + dc_anch + mb_base + mb_anch
 
     # Dedupe
     seen: Set[str] = set()
     deduped: List[Dict] = []
     dc_set = set(id(x) for x in dc_base + dc_anch)
-    for c in pool:
+    for c in pool_all:
         artist, title = c.get("artist"), c.get("title")
         if not artist or not title:
             continue
@@ -106,25 +132,10 @@ def pick_playlist(
             break
         add_unique(rows, used, c["artist"], c["title"], c.get("source", ""))
 
-    # Backfill si faltan
-    if len(rows) < count and key in BACKFILL:
-        bfill = BACKFILL[key][:]
-        if substyle == "underground":
-            bfill.sort(key=lambda x: simp(x["artist"]) in anchor_set)
-        else:
-            bfill.sort(key=lambda x: simp(x["artist"]) not in anchor_set)
-        for it in bfill:
-            if len(rows) >= count:
-                break
-            add_unique(rows, used, it["artist"], it["title"], "backfill")
-
-    # Último recurso genérico (MB)
     if len(rows) < count:
-        gen = mb_client.mb_search_recordings('recording:"salsa" AND tag:"latin"', limit=120)
-        for r in gen:
-            if len(rows) >= count:
-                break
-            add_unique(rows, used, r["artist"], r["title"], "musicbrainz")
+        logger.warning(
+            "pick_playlist(%s): solo %d/%d canciones encontradas", key, len(rows), count
+        )
 
     logger.info("pick_playlist(%s): %d/%d canciones", key, len(rows), count)
     return rows[:count]
@@ -138,16 +149,25 @@ def pick_artist_playlist(
 ) -> List[Dict]:
     """
     Construye una lista de canciones del artista dado.
-    1) MusicBrainz recordings del artista
-    2) Discogs backfill
-    3) MB genérico por nombre
+    MusicBrainz y Discogs se consultan en paralelo.
     """
     rows: List[Dict] = []
     seen: Set[str] = set()
 
-    # 1) MB recordings del artista
-    mb_tracks = mb_client.mb_search_recordings_by_artist(artist, limit=400)
+    # ── MB + Discogs en paralelo ──────────────────────────────────────────────
+    t0 = time.time()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_mb = pool.submit(mb_client.mb_search_recordings_by_artist, artist, 400)
+        f_dc = pool.submit(dc_client.search_by_artist, discogs_client, artist, 200)
+        mb_tracks = f_mb.result()
+        dc_tracks = f_dc.result()
 
+    logger.debug(
+        "pick_artist_playlist sources (%.1fs): mb=%d dc=%d",
+        time.time() - t0, len(mb_tracks), len(dc_tracks),
+    )
+
+    # Ordenar MB por relevancia de género si se especificó
     if genre:
         key = genre.lower().strip().replace("-", "_").replace(" ", "_")
         hints = GENRE_RULES.get(key, {}).get("query_hint", [])
@@ -163,16 +183,13 @@ def pick_artist_playlist(
         add_unique(rows, seen, r["artist"], r["title"], "musicbrainz",
                    query_override=f'{artist} {r["title"]}')
 
-    # 2) Discogs backfill
-    if len(rows) < count:
-        dc_tracks = dc_client.search_by_artist(discogs_client, artist, limit=200)
-        for d in dc_tracks:
-            if len(rows) >= count:
-                break
-            add_unique(rows, seen, d["artist"], d["title"], "discogs",
-                       query_override=f'{artist} {d["title"]}')
+    for d in dc_tracks:
+        if len(rows) >= count:
+            break
+        add_unique(rows, seen, d["artist"], d["title"], "discogs",
+                   query_override=f'{artist} {d["title"]}')
 
-    # 3) MB genérico filtrado por nombre
+    # MB genérico filtrado por nombre si aún faltan
     if len(rows) < count:
         from mpc.sources.musicbrainz import _lucene_escape
         more = mb_client.mb_search_recordings(

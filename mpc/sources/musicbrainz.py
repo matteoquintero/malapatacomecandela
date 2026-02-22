@@ -1,33 +1,52 @@
 # mpc/sources/musicbrainz.py
 # -*- coding: utf-8 -*-
 """
-Cliente MusicBrainz. Rate-limit: 1 req/seg (respetamos las políticas de MB).
+Cliente MusicBrainz.
+- Rate-limit: 1 req/seg con threading.Lock (seguro en contexto paralelo).
+- Cache JSON con TTL 7 días para búsquedas de grabaciones.
 """
 
 import time
+import threading
 import logging
 import requests
 from typing import List, Dict, Optional
 
 from mpc.utils.text import simp
+from mpc.utils.cache import JSONCache
+from mpc.config import PROJECT_DIR
 
 logger = logging.getLogger("mpc.sources.musicbrainz")
 
 MB_BASE = "https://musicbrainz.org/ws/2"
 UA = {"User-Agent": "mala-pata-come-candela/2.0 (mateoquintero)"}
 
+# ── Rate limit thread-safe ─────────────────────────────────────────────────────
+_mb_lock = threading.Lock()
+_mb_last_call: float = 0.0
+
+# ── Cache de búsquedas de grabaciones (TTL 7 días) ────────────────────────────
+_mb_cache = JSONCache(str(PROJECT_DIR / "cache" / "mb_search_cache.json"), ttl_days=7)
+
 
 def mb_get(path: str, params: Dict) -> Dict:
+    """GET a MusicBrainz con rate-limit de 1 req/seg, thread-safe."""
+    global _mb_last_call
     params = {**params, "fmt": "json"}
-    try:
-        r = requests.get(f"{MB_BASE}/{path}", params=params, headers=UA, timeout=30)
-        time.sleep(1.0)  # rate-friendly
-        logger.debug("MB GET %s status=%s", path, r.status_code)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        logger.debug("MB GET error %s: %s", path, e)
-        raise
+    with _mb_lock:
+        elapsed = time.time() - _mb_last_call
+        if elapsed < 1.05:
+            time.sleep(1.05 - elapsed)
+        try:
+            r = requests.get(f"{MB_BASE}/{path}", params=params, headers=UA, timeout=30)
+            _mb_last_call = time.time()
+            logger.debug("MB GET %s status=%s", path, r.status_code)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            _mb_last_call = time.time()
+            logger.debug("MB GET error %s: %s", path, e)
+            raise
 
 
 def _lucene_escape(s: str) -> str:
@@ -35,10 +54,18 @@ def _lucene_escape(s: str) -> str:
 
 
 def mb_search_recordings(query: str, limit: int = 100) -> List[Dict]:
+    """Busca grabaciones. Resultados cacheados 7 días por query+limit."""
+    cache_key = JSONCache.make_key("recordings", query, limit)
+    cached = _mb_cache.get(cache_key)
+    if cached is not None:
+        logger.debug("MB cache HIT [%d]: %.60s", len(cached), query)
+        return cached
+
     try:
         data = mb_get("recording", {"query": query, "limit": limit, "offset": 0})
     except Exception:
         return []
+
     out: List[Dict] = []
     for it in data.get("recordings", []):
         title = it.get("title")
@@ -52,6 +79,8 @@ def mb_search_recordings(query: str, limit: int = 100) -> List[Dict]:
         artist = " & ".join(names) if names else ""
         if title and artist:
             out.append({"artist": artist, "title": title, "source": "musicbrainz"})
+
+    _mb_cache.set(cache_key, out)
     return out
 
 
@@ -79,20 +108,45 @@ def mb_search_recordings_by_artist(artist: str, limit: int = 200) -> List[Dict]:
 
 
 def search_by_rule(key: str, rule: Dict, limit: int = 120) -> List[Dict]:
-    hints_or = " OR ".join([f'"{h}"' for h in rule["query_hint"]])
-    negs = rule.get("negative_hint", [])
-    negs_and = " ".join([f'NOT "{n}"' for n in negs]) if negs else ""
-    tags_or = " OR ".join([f'tag:"{t}"' for t in rule.get("mb_tags", [])]) or 'tag:"latin"'
-    q = f'recording:({hints_or}) AND ({tags_or}) {negs_and}'.strip()
-    return mb_search_recordings(q, limit=limit)
+    """
+    Búsqueda de grabaciones por género usando dos estrategias complementarias:
+    1. Tag-only: la más fiable — busca grabaciones etiquetadas con los tags del género.
+    2. Título + tag: supplemento — busca grabaciones cuyo título contiene hints del género.
+    Los query_hint describen el género musicalmente, NO son términos de título esperados.
+    """
+    tags = rule.get("mb_tags", [])
+    tags_or = " OR ".join([f'tag:"{t}"' for t in tags]) if tags else 'tag:"latin"'
+
+    out: List[Dict] = []
+    seen: set = set()
+
+    # 1. Tag-only (más fiable para género)
+    for r in mb_search_recordings(f'({tags_or})', limit=limit):
+        k = f"{simp(r['artist'])}|{simp(r['title'])}"
+        if k not in seen:
+            seen.add(k)
+            out.append(r)
+
+    # 2. Título con hints + tag como complemento si hacen falta más
+    if len(out) < limit and rule.get("query_hint"):
+        hints_or = " OR ".join([f'"{h}"' for h in rule["query_hint"]])
+        q2 = f'recording:({hints_or}) AND ({tags_or})'
+        for r in mb_search_recordings(q2, limit=limit):
+            k = f"{simp(r['artist'])}|{simp(r['title'])}"
+            if k not in seen:
+                seen.add(k)
+                out.append(r)
+
+    return out[:limit]
 
 
 def search_by_anchors(key: str, rule: Dict, anchors: List[str], limit_each: int = 40) -> List[Dict]:
-    hints_or = " OR ".join([f'"{h}"' for h in rule["query_hint"]])
-    tags_or = " OR ".join([f'tag:"{t}"' for t in rule.get("mb_tags", [])]) or 'tag:"latin"'
+    """Busca grabaciones de artistas ancla filtrando por tags del género."""
+    tags = rule.get("mb_tags", [])
+    tags_or = " OR ".join([f'tag:"{t}"' for t in tags]) if tags else 'tag:"latin"'
     out: List[Dict] = []
     for a in anchors:
-        q = f'recording:({hints_or}) AND ({tags_or}) AND artist:"{a}"'
+        q = f'({tags_or}) AND artist:"{a}"'
         out.extend(mb_search_recordings(q, limit=limit_each))
     return out
 

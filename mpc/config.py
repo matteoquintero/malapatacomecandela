@@ -43,6 +43,7 @@ class Config:
     spotify_client_secret: str = ""
     spotify_redirect_uri: str = "https://localhost:8080/callback"
     spotify_token_cache: str = ""
+    lastfm_api_key: str = ""
 
     # ── Rutas ─────────────────────────────────────────────────────────────────
     dl_music_script: str = ""
@@ -107,8 +108,9 @@ class Config:
             spotify_client_secret=_p("SPOTIFY_CLIENT_SECRET", ""),
             spotify_redirect_uri=_p("SPOTIFY_REDIRECT_URI", "https://localhost:8080/callback"),
             spotify_token_cache=_p("SPOTIFY_TOKEN_CACHE", str(PROJECT_DIR / "cache/spotify_token_cache")),
+            lastfm_api_key=_p("LASTFM_API_KEY", ""),
 
-            dl_music_script=_p("DL_MUSIC_SCRIPT", str(PROJECT_DIR / "dl-music-system.sh")),
+            dl_music_script=_p("DL_MUSIC_SCRIPT", str(PROJECT_DIR / "scripts" / "dl-music-system.sh")),
             lib_base_dir=_p("LIB_BASE_DIR", str(Path.home() / "Music/mala_pata_come_candela")),
             manifest_file=_p("MANIFEST_FILE", f"{cache_dir}/manifest.csv"),
             channel_cache_file=_p("CHANNEL_CACHE_FILE", f"{cache_dir}/yt_channel_cache.json"),
@@ -130,7 +132,7 @@ class Config:
             low_conf_threshold=float(_p("LOW_CONF_THRESHOLD", "0.80")),
 
             debug=_bool("DEBUG_MODE", False),
-            default_csv=_p("DEFAULT_CSV", str(PROJECT_DIR / "canciones.csv")),
+            default_csv=_p("DEFAULT_CSV", str(PROJECT_DIR / "data" / "canciones.csv")),
         )
 
     def validate(self):
