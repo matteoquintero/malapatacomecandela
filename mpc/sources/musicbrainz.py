@@ -25,8 +25,10 @@ UA = {"User-Agent": "mala-pata-come-candela/2.0 (mateoquintero)"}
 _mb_lock = threading.Lock()
 _mb_last_call: float = 0.0
 
-# ── Cache de búsquedas de grabaciones (TTL 7 días) ────────────────────────────
-_mb_cache = JSONCache(str(PROJECT_DIR / "cache" / "mb_search_cache.json"), ttl_days=7)
+# ── Caches separadas por tipo de recurso ─────────────────────────────────────
+_mb_cache        = JSONCache(str(PROJECT_DIR / "cache" / "mb_search_cache.json"),     ttl_days=7)
+_mb_cache_artist = JSONCache(str(PROJECT_DIR / "cache" / "mb_artist_cache.json"),     ttl_days=30)
+_mb_cache_rel    = JSONCache(str(PROJECT_DIR / "cache" / "mb_release_cache.json"),    ttl_days=30)
 
 
 def mb_get(path: str, params: Dict) -> Dict:
@@ -178,6 +180,151 @@ def mb_search_release(artist: str, album: str) -> Optional[Dict]:
 
     rgs.sort(key=score)
     return rgs[0]
+
+
+# ── API del motor de búsqueda multi-estrategia ────────────────────────────────
+
+def mb_search_artists(query: str, limit: int = 20) -> List[Dict]:
+    """
+    Busca artistas por query Lucene (ej: tag:"cha-cha-cha").
+    Solo retorna Person y Group para filtrar entidades no musicales.
+    Cacheado 7 días.
+    """
+    q = f"({query}) AND (type:Group OR type:Person)"
+    cache_key = JSONCache.make_key("artists", q, limit)
+    cached = _mb_cache.get(cache_key)
+    if cached is not None:
+        logger.debug("MB artist cache HIT [%d]", len(cached))
+        return cached
+
+    try:
+        data = mb_get("artist", {"query": q, "limit": limit})
+    except Exception:
+        return []
+
+    out = [
+        {"id": a.get("id"), "name": a.get("name"), "tags": [t["name"] for t in a.get("tags", [])]}
+        for a in data.get("artists", [])
+        if a.get("id") and a.get("name")
+    ]
+    _mb_cache.set(cache_key, out)
+    return out
+
+
+def mb_resolve_artist(name: str) -> Optional[str]:
+    """
+    Resuelve nombre de artista → MBID.
+    Prioriza coincidencia exacta sobre parcial.
+    Cacheado 7 días.
+    """
+    cache_key = JSONCache.make_key("artist_resolve", name)
+    cached = _mb_cache.get(cache_key)
+    if cached is not None:
+        return cached or None
+
+    try:
+        data = mb_get("artist", {"query": f'artist:"{_lucene_escape(name)}"', "limit": 5})
+    except Exception:
+        return None
+
+    artists = data.get("artists", [])
+    mbid = artists[0].get("id") if artists else None
+    _mb_cache.set(cache_key, mbid or "")
+    return mbid
+
+
+def mb_get_artist_recordings(mbid: str, limit: int = 100) -> List[Dict]:
+    """
+    Grabaciones de un artista por MBID.
+    Cacheado 30 días (la discografía cambia poco).
+    """
+    cache_key = JSONCache.make_key("artist_recs", mbid, limit)
+    cached = _mb_cache_artist.get(cache_key)
+    if cached is not None:
+        logger.debug("MB artist_recs cache HIT [%d] mbid=%s", len(cached), mbid)
+        return cached
+
+    try:
+        data = mb_get("recording", {"query": f"arid:{mbid}", "limit": limit})
+    except Exception:
+        return []
+
+    out = []
+    for r in data.get("recordings", []):
+        title = r.get("title", "")
+        if title:
+            out.append({
+                "id": r.get("id"),
+                "title": title,
+                "first-release-date": r.get("first-release-date", ""),
+            })
+
+    _mb_cache_artist.set(cache_key, out)
+    return out
+
+
+def mb_search_releases(query: str, limit: int = 20) -> List[Dict]:
+    """
+    Busca releases por query Lucene (ej: tag:"cha-cha-cha").
+    Cacheado 7 días.
+    """
+    cache_key = JSONCache.make_key("releases", query, limit)
+    cached = _mb_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        data = mb_get("release", {"query": query, "limit": limit})
+    except Exception:
+        return []
+
+    out = [
+        {
+            "id": r.get("id"),
+            "title": r.get("title", ""),
+            "date": r.get("date", ""),
+            "country": r.get("country", ""),
+        }
+        for r in data.get("releases", [])
+        if r.get("id")
+    ]
+    _mb_cache.set(cache_key, out)
+    return out
+
+
+def mb_get_release_tracklist(release_mbid: str) -> List[Dict]:
+    """
+    Tracklist completa de un release (recordings + artist-credits).
+    Cacheado 30 días.
+    """
+    cache_key = JSONCache.make_key("release_tracks", release_mbid)
+    cached = _mb_cache_rel.get(cache_key)
+    if cached is not None:
+        logger.debug("MB release_tracks cache HIT [%d] mbid=%s", len(cached), release_mbid)
+        return cached
+
+    try:
+        data = mb_get(f"release/{release_mbid}", {"inc": "recordings+artist-credits"})
+    except Exception:
+        return []
+
+    out = []
+    for medium in data.get("media", []):
+        for track in medium.get("tracks", []):
+            rec = track.get("recording", {})
+            title = rec.get("title") or track.get("title") or ""
+            ac = rec.get("artist-credit") or data.get("artist-credit", [])
+            names = [c["name"] for c in ac if isinstance(c, dict) and c.get("name")]
+            artist = " & ".join(names) if names else ""
+            if artist and title:
+                out.append({
+                    "artist": artist,
+                    "title": title,
+                    "mbid": rec.get("id"),
+                })
+
+    _mb_cache_rel.set(cache_key, out)
+    return out
 
 
 def mb_release_tracks(release_group_id: str) -> List[Dict]:

@@ -38,6 +38,32 @@ GENRE_COMMAND: Dict[str, str] = {
 
 ALL_SLUGS: List[str] = list(GENRE_COMMAND.keys())
 
+# ── Mapa genre_slug → subdirectorio en la librería ───────────────────────────
+# Fuente única de verdad: sustituye el case statement duplicado en dl-music-system.sh
+GENRE_DIR: Dict[str, str] = {
+    "son_cubano":               "son_cubano",
+    "guajira_moderna":          "guajira_moderna",
+    "guaracha":                 "guaracha",
+    "rumba_guaguanco":          "rumba_guaguanco",
+    "afro_cuban_jazz_descarga": "afro_cuban_jazz_descarga",
+    "mambo":                    "mambo",
+    "cha_cha_cha":              "cha_cha_cha",
+    "boogaloo":                 "boogaloo",
+    "salsa_dura_clasica":       "salsa_dura_clasica",
+    "guaguanco_fusionado":      "guaguanco_fusionado",
+    "exotica":                  "exotica",
+    "latin_soul":               "latin_soul",
+    "plena_bomba":              "plena_bomba",
+    "salsa_romantica":          "salsa_romantica",
+    "timba":                    "timba",
+    "salsa_dura_revival":       "salsa_dura_revival",
+    "balada":                   "balada",
+    "house":                    "house",
+    "nueva_trova":              "nueva_trova",
+    "techno":                   "techno",
+    "cumbia":                   "cumbia",
+}
+
 # Géneros con flujo de búsqueda simplificado (sin clasificador afrolatino)
 DIRECT_GENRES: List[str] = ["balada", "house",
                             "nueva_trova", "techno", "cumbia"]

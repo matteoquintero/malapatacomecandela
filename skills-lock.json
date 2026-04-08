@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "skills": {
+    "clean-architecture": {
+      "source": "pproenca/dot-skills",
+      "sourceType": "github",
+      "computedHash": "613e3421174049dfb4a528c072cafb5e805322a6d9e1522ec9b74077e07947d7"
+    },
+    "clean-ddd-hexagonal": {
+      "source": "ccheney/robust-skills",
+      "sourceType": "github",
+      "computedHash": "b9a54e257685086d0034bd8277964452b7208e2f18bf68d158996936ce667b6a"
+    },
+    "music-downloader": {
+      "source": "nymbo/skills",
+      "sourceType": "github",
+      "computedHash": "909c116411ebe72e9239e3cbe852d80e9277fb8267cec1382c292f26191279da"
+    },
+    "spotify-api": {
+      "source": "fabioc-aloha/spotify-skill",
+      "sourceType": "github",
+      "computedHash": "54f34a7d6811a06f84a4d813a12f9e7448da39255302fafeb9d1c549332fb2f6"
+    }
+  }
+}

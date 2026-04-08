@@ -1,4 +1,4 @@
-# mpc/planner/llm.py
+# mpc/discovery/llm_planner.py
 # -*- coding: utf-8 -*-
 """
 Planificador LLM: convierte lenguaje natural en un plan estructurado.
@@ -11,10 +11,10 @@ import logging
 from typing import Dict, Optional
 
 from mpc.utils.text import strip_accents, simp, extract_count
-from mpc.planner.intent import _guess_artist_from_text
+from mpc.discovery.planner import _guess_artist_from_text
 from mpc.catalog.genres import AFROLATINO_SLUGS
 
-logger = logging.getLogger("mpc.planner.llm")
+logger = logging.getLogger("mpc.discovery.llm_planner")
 
 _GENRE_LIST = ", ".join(AFROLATINO_SLUGS)
 
@@ -149,7 +149,6 @@ def llm_plan(
     if not client:
         return _heuristic_plan(user_text)
 
-    # Seleccionar prompt
     if direct_genre:
         system = SYSTEM_DIRECT_GENRE_TPL.format(genre=direct_genre)
     elif force_curator:
@@ -172,7 +171,6 @@ def llm_plan(
             txt = m.group(0)
         data = json.loads(txt)
 
-        # Defaults
         data.setdefault("task", "playlist")
         data.setdefault("count", 1 if data["task"] == "single" else 10)
         data.setdefault("genre", direct_genre)
@@ -182,12 +180,10 @@ def llm_plan(
         data.setdefault("title", None)
         data.setdefault("constraints", _DEFAULT_PLAN["constraints"].copy())
 
-        # Refuerza count desde texto si viene explícito
         cnt = extract_count(user_text)
         if cnt:
             data["count"] = cnt
 
-        # Si el LLM no detectó artista, intenta heurística
         if not data.get("artist"):
             cand = _guess_artist_from_text(user_text)
             if cand:

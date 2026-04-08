@@ -39,10 +39,10 @@ def cmd_create(args: argparse.Namespace):
     cfg = get_config()
 
     # ── Importaciones lazy (solo cuando se ejecuta create) ────────────────────
-    from mpc.planner.intent import (
+    from mpc.discovery.planner import (
         classify_request, is_blocked, blocked_message, detect_direct_genre
     )
-    from mpc.planner.llm import llm_plan
+    from mpc.discovery.llm_planner import llm_plan
     from mpc.sources.openai_source import get_openai_client, find_real_songs
     from mpc.sources.discogs import get_discogs_client
     from mpc.sources.spotify_client import (
@@ -50,8 +50,7 @@ def cmd_create(args: argparse.Namespace):
         fetch_playlist_tracks, fetch_album_tracks, search_artist_tracks,
         detect_source_type, parse_playlist_id, parse_album_id,
     )
-    from mpc.builders.playlist import pick_playlist, pick_artist_playlist
-    from mpc.builders.album import build_album_csv
+    from mpc.discovery.assembler import pick_playlist, pick_artist_playlist, build_album_csv
     from mpc.utils.csv_io import write_csv, append_csv
     from mpc.utils.text import key_pair, title_case_keep_caps
 

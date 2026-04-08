@@ -65,6 +65,18 @@ def simp_pipeline(s: str) -> str:
     return s
 
 
+_TITLE_STOPWORDS = {"en", "la", "el", "de", "y", "a", "los", "las", "the", "of", "con", "del"}
+
+
+def title_similarity(query: str, candidate: str) -> float:
+    """Jaccard sobre tokens: qué fracción del query está cubierta por el candidato."""
+    q = {t for t in simp_pipeline(query).split() if t and t not in _TITLE_STOPWORDS}
+    c = {t for t in simp_pipeline(candidate).split() if t}
+    if not q:
+        return 0.0
+    return len(q & c) / len(q)
+
+
 def key_pair(artist: str, title: str) -> str:
     return f"{simp(artist)}|{simp(title)}"
 

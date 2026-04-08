@@ -1,4 +1,4 @@
-# mpc/planner/intent.py
+# mpc/discovery/planner.py
 # -*- coding: utf-8 -*-
 """
 Clasificación de intención del usuario: extrae count, artista, tipo de tarea,
@@ -12,7 +12,7 @@ from typing import Dict, Optional
 from mpc.utils.text import strip_accents, simp, extract_count
 from mpc.catalog.genres import BLOCKED_ARTISTS, BLOCKED_GENRES, DIRECT_GENRES
 
-logger = logging.getLogger("mpc.planner.intent")
+logger = logging.getLogger("mpc.discovery.planner")
 
 # ── Patrones ──────────────────────────────────────────────────────────────────
 
@@ -39,7 +39,6 @@ def _clean_artist_name(name: str) -> str:
     if not name:
         return ""
     noise = {
-        # descriptores de popularidad/temporalidad
         "ineditas", "inedita", "raras", "rara", "raros", "raro",
         "clasicas", "clasica", "clasicos", "clasico",
         "mejores", "mejor", "top", "hits", "hit",
@@ -49,7 +48,6 @@ def _clean_artist_name(name: str) -> str:
         "viejo", "tempranas", "temprana", "tempranos", "temprano",
         "tardias", "tardia", "tardios", "tardio", "temas", "tema",
         "canciones", "cancion",
-        # vocabulario de géneros afrolatinos y directos
         "salsa", "dura", "brava", "romantica", "romantico", "erotica",
         "mambo", "son", "cubano", "cubana", "guaracha", "rumba",
         "guaguanco", "timba", "boogaloo", "plena", "bomba", "exotica",
@@ -60,7 +58,7 @@ def _clean_artist_name(name: str) -> str:
     }
     words = name.split()
     cleaned = [w for w in words if re.sub(r"[^\w]", "", w.lower()) not in noise]
-    return " ".join(cleaned)  # cadena vacía si todo era vocabulario de género
+    return " ".join(cleaned)
 
 
 def _guess_artist_from_text(user_text: str) -> Optional[str]:
@@ -68,14 +66,12 @@ def _guess_artist_from_text(user_text: str) -> Optional[str]:
     t = user_text.strip()
     t_norm = strip_accents(t.lower())
 
-    # entre comillas (soporta comillas rectas y curvas)
     m = re.search(r'["\'\u201c\u201d]\s*([^"\'\u201c\u201d]+?)\s*["\'\u201c\u201d]', t)
     if m:
         name = m.group(1).strip()
         if 3 <= len(name) <= 80:
             return name
 
-    # "solo X", "de X" al final del string
     m = re.search(r"\b(?:solo|s[óo]lo|de)\s+([a-záéíóúñ][\w\s\.\-&']{2,80})$", t_norm, flags=re.I)
     if m:
         cand = t[m.start(1):m.end(1)].strip(" :")
@@ -83,7 +79,6 @@ def _guess_artist_from_text(user_text: str) -> Optional[str]:
         if cand_clean and len(cand_clean) >= 3:
             return cand_clean
 
-    # "canciones de X"
     m = re.search(r"canciones\s+de\s+([a-záéíóúñ][\w\s\.\-&']{2,80})", t_norm, flags=re.I)
     if m:
         cand = t[m.start(1):m.end(1)].strip(" :")
@@ -91,7 +86,6 @@ def _guess_artist_from_text(user_text: str) -> Optional[str]:
         if cand_clean and len(cand_clean) >= 3:
             return cand_clean
 
-    # "cancion de X" o "cancion X"
     for pat in [
         r"cancion\s+de\s+([a-záéíóúñ][\w\s\.\-&']{2,80})",
         r"cancion\s+([a-záéíóúñ][\w\s\.\-&']{2,80})$",
@@ -145,7 +139,7 @@ def classify_request(user_text: str) -> Dict:
     }
 
 
-# ── Blocklist ─────────────────────────────────────────────────────────────────
+# ── Blocklist ──────────────────────────────────────────────────────────────────
 
 def is_blocked(text: str) -> bool:
     """Devuelve True si el texto contiene artista o género bloqueado."""
@@ -186,7 +180,6 @@ def detect_direct_genre(user_input: str, genre_arg: Optional[str] = None) -> tup
         g = genre_arg.lower()
         if g in DIRECT_GENRES:
             return user_input, g
-        # No es directo → lo trataremos como hint en el planner
         return user_input, None
 
     return user_input, None
