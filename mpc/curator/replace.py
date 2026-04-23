@@ -111,9 +111,10 @@ _YTDLP_AUDIO_BASE = ["-x", "--audio-format", "mp3", "--audio-quality", "0", "-o"
 
 
 def replace_audio(repo: TrackRepository, track: Dict, youtube_id: str) -> bool:
-    """Re-descarga MP3 desde YouTube y aplica tags desde BD."""
-    from mpc.acquisition.steps.tagger import MetadataTagger
-    from mpc.curator.fixers.thumbnails import fetch_from_youtube
+    """Re-descarga MP3 desde YouTube y escribe tags ID3 directamente desde BD.
+    NO consulta AlbumResolver — BD es SSOT, los tags reflejan exactamente BD."""
+    from mpc.curator.fixers.thumbnails import fetch_from_youtube, embed_thumbnail
+    from mpc.catalog.genres import genre_name as _gname
 
     if not shutil.which("yt-dlp"):
         print("❌ yt-dlp no está en PATH")
@@ -124,14 +125,14 @@ def replace_audio(repo: TrackRepository, track: Dict, youtube_id: str) -> bool:
         print("❌ Track sin filepath en BD")
         return False
 
-    artist = track["artist"]
-    title = track["title"]
+    artist = sanitize_filename_component(track["artist"])
+    title = sanitize_filename_component(track["title"])
     genre_slug = track.get("genre_slug") or ""
     album = track.get("album") or ""
     year = track.get("year") or ""
 
     target_dir = str(Path(old_fp).parent)
-    filename = canonical_filename(artist, title, ".mp3")
+    filename = canonical_filename(track["artist"], track["title"], ".mp3")
     new_fp = os.path.join(target_dir, filename)
 
     url = f"https://www.youtube.com/watch?v={youtube_id}"
@@ -142,35 +143,27 @@ def replace_audio(repo: TrackRepository, track: Dict, youtube_id: str) -> bool:
         print(f"❌ yt-dlp falló: {(r.stderr or '')[:200]}")
         return False
 
-    # Thumbnail
-    thumb_path = ""
-    jpg = fetch_from_youtube(youtube_id)
-    if jpg:
-        import tempfile
-        tf = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
-        tf.write(jpg)
-        tf.close()
-        thumb_path = tf.name
-
-    # Aplicar tags con ffmpeg (MetadataTagger resuelve album vía resolver si vacío)
-    print("→ Aplicando tags desde BD...")
-    tagger = MetadataTagger()
-    ok = tagger.tag(
+    # Tags directos desde BD (sin resolver, sin tocar álbum si BD lo tiene vacío)
+    print("→ Escribiendo tags ID3 desde BD...")
+    _write_id3_from_bd(
         new_fp,
-        sanitize_filename_component(artist),
-        sanitize_filename_component(title),
-        genre_slug,
-        thumb_path or None,
+        artist=artist,
+        title=title,
+        album=album,
+        genre_label=_gname(genre_slug) or genre_slug.replace("_", " "),
+        year=year,
     )
 
-    # Si BD tiene album/year explícitos, forzarlos con mutagen (sobrescribe resolver)
-    if album or year:
-        _force_id3(new_fp, album=album, year=year)
+    # Thumbnail → APIC
+    jpg = fetch_from_youtube(youtube_id)
+    if jpg:
+        try:
+            embed_thumbnail(new_fp, jpg)
+            print(f"→ APIC embebido ({len(jpg)} bytes)")
+        except Exception as e:
+            print(f"⚠️ APIC falló: {e}")
 
-    if thumb_path and os.path.exists(thumb_path):
-        os.unlink(thumb_path)
-
-    # Actualizar BD
+    # Actualizar BD (no tocamos album/year — ya son fuente)
     flags = {
         "audio_source_id": youtube_id,
         "filepath": new_fp,
@@ -181,24 +174,39 @@ def replace_audio(repo: TrackRepository, track: Dict, youtube_id: str) -> bool:
     }
     repo.update_curator_flags(track["track_id"], **flags)
     print(f"✅ MP3 reemplazado: {new_fp}")
-    return ok
+    return True
 
 
-def _force_id3(path: str, album: str = "", year: str = "") -> None:
-    """Sobrescribe TALB/TDRC con valores de BD si están seteados."""
+def _write_id3_from_bd(
+    path: str,
+    artist: str,
+    title: str,
+    album: str,
+    genre_label: str,
+    year: str,
+) -> None:
+    """Escribe ID3 directamente desde valores de BD. Si un valor está vacío,
+    el frame correspondiente queda vacío/ausente — no se inventa nada."""
     try:
-        from mutagen.id3 import ID3, TALB, TDRC, ID3NoHeaderError
+        from mutagen.id3 import ID3, TPE1, TIT2, TALB, TCON, TDRC, ID3NoHeaderError
     except ImportError:
         return
     try:
         tags = ID3(path)
     except ID3NoHeaderError:
         tags = ID3()
+    tags.delall("TPE1")
+    tags.add(TPE1(encoding=3, text=artist))
+    tags.delall("TIT2")
+    tags.add(TIT2(encoding=3, text=title))
+    tags.delall("TALB")
     if album:
-        tags.delall("TALB")
         tags.add(TALB(encoding=3, text=album))
+    tags.delall("TCON")
+    if genre_label:
+        tags.add(TCON(encoding=3, text=genre_label))
+    tags.delall("TDRC")
     if year:
-        tags.delall("TDRC")
         tags.add(TDRC(encoding=3, text=year))
     tags.save(path, v2_version=3)
 
@@ -315,39 +323,26 @@ def replace_video(repo: TrackRepository, track: Dict, youtube_id: str) -> bool:
 def replace_thumbnail(
     repo: TrackRepository, track: Dict, youtube_id: str
 ) -> bool:
-    """Baja thumbnail de YouTube y lo embebe en MP3 (APIC) y MP4 (covr) si existe."""
+    """Baja thumbnail de YouTube y lo embebe SOLO en MP3 (APIC).
+    El MP4 NO se toca — para eso está `curator fix-video-thumbnails`."""
     from mpc.curator.fixers.thumbnails import fetch_from_youtube, embed_thumbnail
+
+    audio_fp = track.get("filepath") or ""
+    if not audio_fp or not os.path.isfile(audio_fp):
+        print("❌ Track sin MP3 válido en BD")
+        return False
 
     jpg = fetch_from_youtube(youtube_id)
     if not jpg:
         print(f"❌ YouTube {youtube_id} sin thumbnail disponible")
         return False
 
-    ok_any = False
-    audio_fp = track.get("filepath") or ""
-    if audio_fp and os.path.isfile(audio_fp):
-        try:
-            embed_thumbnail(audio_fp, jpg)
-            print(f"✅ APIC embebido en MP3 ({len(jpg)} bytes)")
-            ok_any = True
-        except Exception as e:
-            print(f"❌ MP3 embed falló: {e}")
+    try:
+        embed_thumbnail(audio_fp, jpg)
+    except Exception as e:
+        print(f"❌ MP3 embed falló: {e}")
+        return False
 
-    video_fp = track.get("video_filepath") or ""
-    if video_fp and os.path.isfile(video_fp):
-        try:
-            from mutagen.mp4 import MP4, MP4Cover
-            mp4 = MP4(video_fp)
-            mp4["covr"] = [MP4Cover(jpg, imageformat=MP4Cover.FORMAT_JPEG)]
-            mp4.save()
-            print(f"✅ covr embebido en MP4 ({len(jpg)} bytes)")
-            ok_any = True
-        except Exception as e:
-            print(f"❌ MP4 embed falló: {e}")
-
-    if ok_any:
-        flags = {"has_thumbnail": 1}
-        if video_fp:
-            flags["has_video_thumbnail"] = 1
-        repo.update_curator_flags(track["track_id"], **flags)
-    return ok_any
+    print(f"✅ APIC embebido en MP3 ({len(jpg)} bytes)")
+    repo.update_curator_flags(track["track_id"], has_thumbnail=1)
+    return True
