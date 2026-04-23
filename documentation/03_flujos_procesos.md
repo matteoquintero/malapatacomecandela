@@ -19,7 +19,7 @@ mala-pata download
         │
         ├── [SEARCH]   pipeline_music.py
         │              query_override → YouTube ID directo
-        │              yt-dlp ytsearch / YouTube API → ID
+        │              yt-dlp ytsearch → ID directo
         │
         ├── [CLASSIFY] heuristic_scores() → softmax
         │              llm_call() si heurística < umbral  (CLASSIFIER_MODE)
@@ -59,16 +59,14 @@ Backwards compat: `mala-pata "pedido"` (sin subcomando) → trata como `create`.
 
 ---
 
-## Modos de búsqueda YouTube (download)
+## Búsqueda de música (download)
 
-Controlado por `SEARCH_MODE` en `.env`:
+El sistema usa yt-dlp para búsquedas en YouTube y SoundCloud:
 
-| Valor | Comportamiento |
+| Variable | Descripción |
 |---|---|
-| `no_api_first` | yt-dlp primero, API YouTube si falla |
-| `api_first` | YouTube API primero, yt-dlp si falla |
-| `no_api_only` | Solo yt-dlp (sin gastar cuota) |
-| `api_only` | Solo YouTube API |
+| `NOAPI_SOURCES` | Fuentes de búsqueda (default: `ytsearch,scsearch`) |
+| `YTDLP_BIN` | Ruta al ejecutable de yt-dlp |
 
 ---
 

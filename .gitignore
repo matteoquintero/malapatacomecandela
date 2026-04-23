@@ -4,6 +4,27 @@
 .env.local
 .env.production
 
+# Estado local de herramientas (Claude Code, Atlas, Paul, OpenSpec)
+.atl/
+.paul/
+.claude/
+openspec/
+
+# BD local y caches
+cache.library.db
+cache/*.db
+cache/*.jsonl
+
+# Audit reports locales
+data/audit_reports/
+data/canciones_faltan.csv
+data/canciones_pendientes.csv
+data/canciones_re_download.csv
+data/canciones_redownload.csv
+data/ids_sin_thumbnail.csv
+data/sin_thumbnail.csv
+data/*.backup.*
+
 # Entorno virtual de Python
 .venv/
 venv/

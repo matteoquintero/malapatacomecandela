@@ -29,8 +29,67 @@ _GENERIC_CH_PAT = re.compile(
 )
 
 
+def _extract_year(cand: Dict) -> Optional[int]:
+    """Extrae año de lanzamiento desde release_year, release_date o upload_date (yt-dlp)."""
+    for key in ("release_year", "release_date", "upload_date"):
+        v = cand.get(key)
+        if not v:
+            continue
+        s = str(v)
+        m = re.search(r"(19|20)\d{2}", s)
+        if m:
+            try:
+                year = int(m.group(0))
+                if 1900 <= year <= 2100:
+                    return year
+            except ValueError:
+                pass
+    return None
+
+
 def _key_tokens(title: str) -> set:
     return {t for t in _simp(title).split() if len(t) >= 4 and t not in _STOPWORDS}
+
+
+def _best_abr(cand: Dict) -> float:
+    """Extrae el mejor audio bitrate disponible del candidato. 0 si no hay info."""
+    abr = cand.get("abr")
+    if abr:
+        try:
+            return float(abr)
+        except (TypeError, ValueError):
+            pass
+    formats = cand.get("formats") or []
+    best = 0.0
+    for f in formats:
+        if not isinstance(f, dict):
+            continue
+        # Solo streams de audio (vcodec="none" en yt-dlp)
+        if f.get("vcodec") and f.get("vcodec") != "none":
+            continue
+        a = f.get("abr") or 0
+        try:
+            a = float(a)
+        except (TypeError, ValueError):
+            a = 0
+        if a > best:
+            best = a
+    return best
+
+
+def _score_quality(cand: Dict) -> float:
+    """Bonus/penalty por calidad de audio del mejor stream disponible.
+    Aditivo al scoring existente (no reemplaza officiality/title/etc)."""
+    abr = _best_abr(cand)
+    if abr >= 256:
+        return 1.5
+    elif abr >= 192:
+        return 1.0
+    elif abr >= 128:
+        return 0.5
+    elif 0 < abr < 96:
+        return -1.0
+    return 0.0
 
 
 def _score_officiality(artist: str, channel_title: str) -> float:
@@ -126,6 +185,8 @@ def choose_best(candidates: List[Dict], artist: str, title: str) -> Optional[Dic
         if 150 <= dur <= 480:
             score += 0.5
         score -= rank * 0.1
+        # NUEVO: bonus por calidad de audio (aditivo, no reemplaza otros filtros)
+        score += _score_quality(c)
 
         if score > best_score:
             best_score = score
@@ -163,8 +224,11 @@ class CandidateScorerStep(BaseStep):
         ctx["best_meta"] = {
             "title": req.title,
             "artist": req.artist,
+            "yt_title": best.get("title", ""),
             "description": best.get("description", ""),
             "channel": best.get("channel_title_full") or best.get("channel", ""),
+            "duration_sec": int(best.get("duration_sec") or 0) or None,
+            "release_year": _extract_year(best),
         }
         logger.debug("scorer: elegido platform=%s display_id=%s url=%s",
                      ref.platform, ref.display_id, ref.url)

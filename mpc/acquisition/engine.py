@@ -32,12 +32,14 @@ from mpc.acquisition.result import DownloadError, DownloadResult, DownloadStatus
 from mpc.acquisition.steps.base import BaseStep
 from mpc.acquisition.steps.classifier import GenreClassifierStep
 from mpc.acquisition.steps.downloader import DownloaderStep, SpotdlDownloader, YtDlpDownloader
+from mpc.acquisition.steps.enrichment import GenreEnrichmentStep
 from mpc.acquisition.steps.idempotency import IdempotencyStep
 from mpc.acquisition.steps.scorer import CandidateScorerStep
 from mpc.acquisition.steps.search_noapi import NoApiSearchStep
 from mpc.acquisition.track_ref import SPOTIFY, TrackRef, infer_platform, youtube_ref
 from mpc.library.repository import TrackRepository
 from mpc.library.index import LibraryIndex
+from mpc.library.identity import track_id as make_track_id
 from mpc.utils.text import simp_pipeline as _simp_text
 
 logger = logging.getLogger("mpc.acquisition.engine")
@@ -54,8 +56,7 @@ _LOG_CSV_COLS = [
 class DownloadConfig:
     # Rutas
     lib_base_dir: str
-    manifest_path: str     # legacy CSV path (para migración); nuevo: db_path
-    db_path: str = ""      # SQLite library path; si vacío usa manifest_path.replace('.csv','.db')
+    db_path: str           # SQLite library path (obligatorio)
 
     # Búsqueda (yt-dlp, sin API — escalable a cualquier fuente que soporte yt-dlp)
     search_sources: List[str] = field(default_factory=lambda: ["ytsearch", "scsearch"])
@@ -68,13 +69,15 @@ class DownloadConfig:
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
 
+    # Enrichment (MusicBrainz/Discogs antes del clasificador)
+    enrichment_enabled: bool = True
+    discogs_token: str = ""
+
     # Pausa entre canciones (segundos)
     sleep_between: float = 0.5
 
     def resolved_db_path(self) -> str:
-        if self.db_path:
-            return self.db_path
-        return self.manifest_path.replace(".csv", ".db")
+        return self.db_path
 
     @classmethod
     def from_env(cls) -> "DownloadConfig":
@@ -84,11 +87,10 @@ class DownloadConfig:
             load_dotenv()
         except Exception:
             pass
-        manifest = os.getenv("MANIFEST_FILE", os.path.join(os.getcwd(), "cache/manifest.csv"))
+        default_db = os.path.join(os.getcwd(), "cache/library.db")
         return cls(
             lib_base_dir=os.getenv("LIB_BASE_DIR", os.path.expanduser("~/Music/mala_pata_come_candela")),
-            manifest_path=manifest,
-            db_path=os.getenv("LIBRARY_DB", manifest.replace(".csv", ".db")),
+            db_path=os.getenv("LIBRARY_DB", default_db),
             search_sources=[s.strip() for s in os.getenv("SEARCH_SOURCES", "ytsearch,scsearch").split(",") if s.strip()],
             ytdlp_bin=os.getenv("YTDLP_BIN", "yt-dlp"),
             spotdl_bin=os.getenv("SPOTDL_BIN", "spotdl"),
@@ -96,6 +98,8 @@ class DownloadConfig:
             classifier_mode=os.getenv("CLASSIFIER_MODE", "LLM_FALLBACK"),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            enrichment_enabled=os.getenv("ENRICHMENT_ENABLED", "true").lower() in ("true", "1", "yes", "on"),
+            discogs_token=os.getenv("DISCOGS_TOKEN", ""),
         )
 
 
@@ -167,13 +171,11 @@ class DownloadEngine:
 
     def __init__(self, config: DownloadConfig):
         self.config = config
-        self._repo = TrackRepository(
-            db_path=config.resolved_db_path(),
-            legacy_csv=config.manifest_path,   # migra CSV legado si la tabla está vacía
-        )
+        self._repo = TrackRepository(db_path=config.resolved_db_path())
         self._lib_index = _build_lib_index(config.lib_base_dir)
         self._openai_client = self._init_openai()
         self._genres_ref = _build_genres_ref()
+        self._discogs_client = self._init_discogs()
 
     def _init_openai(self) -> Optional[Any]:
         if not self.config.openai_api_key:
@@ -183,6 +185,16 @@ class DownloadEngine:
             return OpenAI(api_key=self.config.openai_api_key)
         except Exception as e:
             logger.warning("engine: OpenAI no disponible: %s", e)
+            return None
+
+    def _init_discogs(self) -> Optional[Any]:
+        if not self.config.enrichment_enabled or not self.config.discogs_token:
+            return None
+        try:
+            from mpc.sources.discogs import get_discogs_client
+            return get_discogs_client(self.config.discogs_token)
+        except Exception as e:
+            logger.debug("engine: Discogs no disponible: %s", e)
             return None
 
     def build_steps(self) -> List[BaseStep]:
@@ -195,18 +207,23 @@ class DownloadEngine:
         spotdl = SpotdlDownloader(cfg.lib_base_dir, cfg.spotdl_bin)
 
         return [
-            IdempotencyStep(self._repo, self._lib_index),
+            IdempotencyStep(self._repo, self._lib_index, cfg.lib_base_dir),
             NoApiSearchStep(
                 ytdlp_bin=cfg.ytdlp_bin,
                 sources=cfg.search_sources,
                 max_results=cfg.max_search_results,
             ),
             CandidateScorerStep(),
+            GenreEnrichmentStep(
+                enabled=cfg.enrichment_enabled,
+                discogs_client=self._discogs_client,
+            ),
             GenreClassifierStep(
                 mode=cfg.classifier_mode,
                 openai_client=self._openai_client,
                 openai_model=cfg.openai_model,
                 genres_ref=self._genres_ref,
+                repository=self._repo,
             ),
             DownloaderStep(ytdlp, spotdl),
         ]
@@ -257,7 +274,8 @@ class DownloadEngine:
                 ctx["video_id"] = ref.display_id
                 ctx["query_used"] = f"override ({ref.platform}): {ref.display_id}"
                 ctx["best_meta"] = {"title": request.title, "artist": request.artist,
-                                    "description": "", "channel": ""}
+                                    "description": "", "channel": "",
+                                    "duration_sec": None, "release_year": None}
                 print(f"   🎯 Override directo ({ref.platform}): {ref.display_id}")
 
         steps = self.build_steps()
@@ -303,18 +321,74 @@ class DownloadEngine:
         )
 
         if result.status == DownloadStatus.DOWNLOADED and not request.dry_run:
+            best = ctx.get("best_meta") or {}
+            yt_title = best.get("yt_title") or ""
+            channel = best.get("channel") or ""
+            duration = best.get("duration_sec")
+            year = best.get("release_year") or ""
             self._repo.record(
                 artist=request.artist,
                 title=request.title,
-                video_id=result.video_id,
+                audio_source_id=result.video_id,
+                audio_source_platform=result.platform,
                 platform=result.platform,
                 genre_slug=result.genre_slug,
                 filepath=result.filepath,
                 status="downloaded",
                 confidence=result.confidence,
             )
+            # Poblar metadata extendida (título YT, canal, duración, año) + consistency
+            tid = make_track_id(request.artist, request.title)
+            if result.video_id:
+                self._repo.update_audio_source(
+                    tid, result.video_id,
+                    platform=result.platform or "youtube",
+                    title=yt_title, channel=channel,
+                    duration=int(duration) if duration else None,
+                )
+            # Marcar metadata_consistent=1 (pipeline ya usa SSOT sanitizer)
+            self._repo.update_curator_flags(
+                tid,
+                metadata_consistent=1,
+                has_valid_tags=1,
+                filename_ok=1,
+            )
+            if year:
+                with self._repo._conn() as con:
+                    con.execute(
+                        "UPDATE tracks SET year=COALESCE(NULLIF(?,''), year) WHERE track_id=?",
+                        (str(year), tid),
+                    )
+
+            # Análisis de calidad automático (tier máximo disponible según deps)
+            self._analyze_quality(result.filepath, tid)
 
         return result
+
+    def _analyze_quality(self, filepath: str, track_id_val: str) -> None:
+        """Corre tier máximo disponible y persiste en BD. Silencioso si falla."""
+        import os
+        try:
+            from mpc.curator.quality import ffprobe, loudness, fingerprint, score
+        except Exception:
+            return
+        if not filepath or not os.path.isfile(filepath):
+            return
+        metrics = {}
+        if ffprobe.is_available():
+            metrics.update(ffprobe.analyze(filepath))
+        if loudness.is_available():
+            metrics.update(loudness.analyze(filepath))
+        if fingerprint.is_available():
+            ak = os.getenv("ACOUSTID_API_KEY", "")
+            metrics.update(fingerprint.analyze(filepath, ak))
+        if not metrics:
+            return
+        metrics["audio_quality_score"] = score.compute(metrics)
+        try:
+            self._repo.update_quality(track_id_val, metrics)
+        except Exception:
+            pass
 
     def process_batch(self, requests: List[DownloadRequest]) -> List[DownloadResult]:
         """Procesa una lista de requests secuencialmente."""

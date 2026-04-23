@@ -4,80 +4,7 @@
 
 El sistema integra múltiples APIs externas para proporcionar funcionalidades completas de búsqueda, clasificación y descarga de música. Cada API tiene un propósito específico y se utiliza de manera optimizada para minimizar costos y maximizar la calidad de los resultados.
 
-## 1. YouTube Data API v3
-
-### Propósito
-
-- Búsqueda de videos musicales
-- Obtención de metadatos de videos
-- Información de canales y estadísticas
-
-### Configuración
-
-```bash
-YOUTUBE_API_KEY=tu_api_key_aqui
-YOUTUBE_MAX_RESULTS=5
-YOUTUBE_CALL_BUDGET=4000000
-```
-
-### Endpoints Utilizados
-
-#### `search.list`
-
-- **Costo**: 100 unidades de cuota
-- **Uso**: Búsqueda de videos y canales
-- **Parámetros**:
-  - `q`: Query de búsqueda
-  - `type`: "video" o "channel"
-  - `maxResults`: Número de resultados
-  - `order`: "relevance"
-  - `videoEmbeddable`: "true"
-
-#### `videos.list`
-
-- **Costo**: 1 unidad de cuota
-- **Uso**: Metadatos detallados de videos
-- **Parámetros**:
-  - `id`: IDs de videos separados por comas
-  - `part`: "contentDetails,statistics"
-
-#### `channels.list`
-
-- **Costo**: 1 unidad de cuota
-- **Uso**: Información de canales
-- **Parámetros**:
-  - `id`: IDs de canales
-  - `part`: "statistics,snippet"
-
-### Estrategia de Búsqueda
-
-#### 1. Búsqueda por Canal Oficial
-
-```python
-# Prioriza canales oficiales del artista
-channels = search_official_channels(artist, per_track)
-for channel in channels:
-    videos = search_videos_in_channel(title, channel_id)
-```
-
-#### 2. Búsqueda General con Filtros
-
-```python
-# Filtros negativos para evitar contenido no deseado
-negatives = [
-    '-live', '-"en vivo"', '-"en directo"', '-concert',
-    '-session', '-karaoke', '-cover', '-"full album"',
-    '-lyrics', '-letra', '-subtitles', '-mix'
-]
-```
-
-### Sistema de Caché
-
-- **Archivo**: `cache/yt_search_cache.json`
-- **TTL**: 45 días por defecto
-- **Clave**: `{artist_normalized}|{title_normalized}`
-
-## 2. OpenAI API
+## 1. OpenAI API
 
 ### Propósito
 
@@ -365,7 +292,6 @@ mala-pata create --spotify URL --type album --count 10 --genre mambo
 ### Configuración
 
 ```bash
-SEARCH_MODE=no_api_first
 NOAPI_SOURCES=ytsearch,scsearch
 YTDLP_BIN=yt-dlp
 ```
@@ -404,22 +330,7 @@ def yt_dlp_search(query, max_results=5, source="ytsearch"):
 - **Canales**: TTL de 30 días
 - **Deduplicación**: Por clave normalizada
 
-### 2. Fallback Automático
-
-```python
-if SEARCH_MODE == "no_api_first":
-    results = try_noapi_search()
-    if not results and budget_left() > 0:
-        results = try_api_search()
-```
-
-### 3. Gestión de Cuotas
-
-- **Presupuesto**: 4M unidades YouTube por defecto
-- **Monitoreo**: Seguimiento en tiempo real
-- **Alertas**: Notificación cuando se agota
-
-### 4. Rate Limiting
+### 2. Rate Limiting
 
 - **MusicBrainz**: 1 segundo entre llamadas
 - **Discogs**: Respeta límites de la API
@@ -469,12 +380,6 @@ except QuotaExceededError:
 ```
 
 ## Consideraciones de Costo
-
-### YouTube API
-
-- **Búsqueda**: $0.00 (gratis hasta 10,000 unidades/día)
-- **Videos**: $0.00 (gratis)
-- **Canales**: $0.00 (gratis)
 
 ### OpenAI
 

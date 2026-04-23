@@ -103,7 +103,6 @@ mala-pata delete --artist "X" --title "Y"
 
 | Variable | Efecto |
 |---|---|
-| `SEARCH_MODE=no_api_only` | Usa solo yt-dlp (sin gastar cuota YouTube) |
 | `CLASSIFIER_MODE=HEURISTIC_ONLY` | Sin LLM en el clasificador |
 | `OPENAI_API_KEY=` (vacía) | Desactiva LLM en el planner y clasificador |
 

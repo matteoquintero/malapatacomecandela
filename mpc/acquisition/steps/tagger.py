@@ -42,7 +42,22 @@ class MetadataTagger:
             logger.warning("tagger: ffmpeg no encontrado en PATH, sin metadatos")
             return False
 
-        genre_label = genre_dir.replace("_", " ")
+        # TCON: nombre legible del género (desde GENRE_DB)
+        try:
+            from mpc.catalog.genres import genre_name as _gname
+            genre_label = _gname(genre_dir) or genre_dir.replace("_", " ")
+        except Exception:
+            genre_label = genre_dir.replace("_", " ")
+
+        # TALB: album real vía AlbumResolver (MB → Discogs → LLM → vacío)
+        album = ""
+        try:
+            from mpc.curator.album_resolver import build_default_resolver
+            r = build_default_resolver().resolve(artist, title)
+            album = r.get("album", "")
+        except Exception as e:
+            logger.debug("tagger: album_resolver falló: %s", e)
+
         year = str(__import__("datetime").datetime.now().year)
 
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
@@ -51,16 +66,16 @@ class MetadataTagger:
         try:
             if thumbnail_path and os.path.exists(thumbnail_path):
                 ok = self._tag_with_artwork(
-                    filepath, tmp_path, artist, title, genre_dir, genre_label, year, thumbnail_path
+                    filepath, tmp_path, artist, title, album, genre_label, year, thumbnail_path
                 )
                 if not ok:
                     logger.debug("tagger: artwork falló, reintentando sin él")
                     ok = self._tag_without_artwork(
-                        filepath, tmp_path, artist, title, genre_dir, genre_label, year
+                        filepath, tmp_path, artist, title, album, genre_label, year
                     )
             else:
                 ok = self._tag_without_artwork(
-                    filepath, tmp_path, artist, title, genre_dir, genre_label, year
+                    filepath, tmp_path, artist, title, album, genre_label, year
                 )
 
             if ok and os.path.exists(tmp_path):
@@ -77,7 +92,7 @@ class MetadataTagger:
 
     def _tag_with_artwork(
         self, src: str, dst: str, artist: str, title: str,
-        genre_dir: str, genre_label: str, year: str, thumb: str
+        album: str, genre_label: str, year: str, thumb: str
     ) -> bool:
         cmd = [
             "ffmpeg",
@@ -90,7 +105,7 @@ class MetadataTagger:
             "-disposition:v", "attached_pic",
             "-metadata", f"title={title}",
             "-metadata", f"artist={artist}",
-            "-metadata", f"album={genre_dir}",
+            "-metadata", f"album={album}",
             "-metadata", f"genre={genre_label}",
             "-metadata", f"date={year}",
             dst,
@@ -100,7 +115,7 @@ class MetadataTagger:
 
     def _tag_without_artwork(
         self, src: str, dst: str, artist: str, title: str,
-        genre_dir: str, genre_label: str, year: str
+        album: str, genre_label: str, year: str
     ) -> bool:
         cmd = [
             "ffmpeg",
@@ -108,7 +123,7 @@ class MetadataTagger:
             "-c:a", "copy",
             "-metadata", f"title={title}",
             "-metadata", f"artist={artist}",
-            "-metadata", f"album={genre_dir}",
+            "-metadata", f"album={album}",
             "-metadata", f"genre={genre_label}",
             "-metadata", f"date={year}",
             dst,

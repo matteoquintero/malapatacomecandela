@@ -14,7 +14,7 @@ Uso:
 
 Variables de entorno (.env):
     LIB_BASE_DIR     Directorio raíz de la librería (default: ~/Music/mala_pata_come_candela)
-    MANIFEST_FILE    Ruta del manifest de descargas (default: cache/manifest.csv)
+    LIBRARY_DB       Ruta de la BD SQLite (default: cache/library.db)
     SEARCH_SOURCES   Fuentes yt-dlp separadas por coma (default: ytsearch,scsearch)
     YTDLP_BIN        Binario de yt-dlp (default: yt-dlp)
     MAX_SEARCH_RESULTS Máximo de resultados por búsqueda (default: 5)
@@ -28,7 +28,8 @@ import argparse
 import os
 
 # ── .env ──────────────────────────────────────────────────────────────────────
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+# PROJECT_DIR es la raíz del proyecto (parent de scripts/)
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from dotenv import load_dotenv
@@ -44,7 +45,7 @@ except Exception:
 
 # ── Config ────────────────────────────────────────────────────────────────────
 LIB_BASE_DIR   = os.getenv("LIB_BASE_DIR", os.path.expanduser("~/Music/mala_pata_come_candela"))
-MANIFEST_FILE  = os.getenv("MANIFEST_FILE", os.path.join(PROJECT_DIR, "cache/manifest.csv"))
+LIBRARY_DB     = os.getenv("LIBRARY_DB", os.path.join(PROJECT_DIR, "cache/library.db"))
 CLASSIFIER_MODE = os.getenv("CLASSIFIER_MODE", "LLM_FALLBACK")
 OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL    = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
@@ -53,18 +54,9 @@ YTDLP_BIN       = os.getenv("YTDLP_BIN", "yt-dlp")
 MAX_SEARCH_RESULTS = int(os.getenv("MAX_SEARCH_RESULTS", "5"))
 DL_SCRIPT       = os.getenv("DL_MUSIC_SCRIPT", os.path.join(PROJECT_DIR, "dl-music-system.sh"))
 
-# Compat: manifest legado
-try:
-    _old = os.path.expanduser("~/.mala_pata/manifest.csv")
-    if "MANIFEST_FILE" not in os.environ and os.path.exists(_old):
-        MANIFEST_FILE = _old
-        debug_print(f"ℹ️ Manifest heredado: {_old}")
-except Exception:
-    pass
-
 debug_print("⚙️ Config:")
 debug_print(f"   LIB_BASE_DIR      = {LIB_BASE_DIR}")
-debug_print(f"   MANIFEST_FILE     = {MANIFEST_FILE}")
+debug_print(f"   LIBRARY_DB        = {LIBRARY_DB}")
 debug_print(f"   SEARCH_SOURCES    = {SEARCH_SOURCES}")
 debug_print(f"   MAX_SEARCH_RESULTS= {MAX_SEARCH_RESULTS}")
 debug_print(f"   CLASSIFIER_MODE   = {CLASSIFIER_MODE}")
@@ -75,11 +67,11 @@ debug_print(f"   YTDLP_BIN         = {YTDLP_BIN}")
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 def process_csv(input_csv: str, out_csv: str, dry_run: bool = False,
                 image_type: str = "hq", sleep_s: float = 0.6):
-    """Thin wrapper: delega al DownloadEngine en mpc/download/."""
+    """Thin wrapper: delega al DownloadEngine en mpc/acquisition/."""
     from mpc.acquisition.engine import DownloadConfig, DownloadEngine
     cfg = DownloadConfig(
         lib_base_dir=LIB_BASE_DIR,
-        manifest_path=MANIFEST_FILE,
+        db_path=LIBRARY_DB,
         search_sources=SEARCH_SOURCES,
         ytdlp_bin=YTDLP_BIN,
         max_search_results=MAX_SEARCH_RESULTS,

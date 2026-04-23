@@ -55,13 +55,15 @@ dl_music() {
     local ARTISTA="$3"
     local TITULO="$4"
     local IMAGEN_TYPE="${5:-hq}"  # Por defecto 'hq'
+    local WITH_VIDEO="${6:-}"      # Video flag opcional
 
     # Validar parámetros
     if [ $# -lt 4 ]; then
-        echo "❌ Uso: $GENERO \"VIDEO_ID\" \"ARTISTA\" \"TITULO\" [IMAGEN_TYPE]"
+        echo "❌ Uso: $GENERO \"VIDEO_ID\" \"ARTISTA\" \"TITULO\" [IMAGEN_TYPE] [with_video]"
         echo "📍 Ejemplo: $GENERO \"atVS36nBgDw\" \"Héctor Lavoe\" \"El Cantante\" hq"
         echo "💡 Solo necesitas el ID del video, no la URL completa"
         echo "🖼️  Tipos de imagen: 'hq' (default) o 'max' (mejor calidad)"
+        echo "🎬 Para video: pasa 'video' como 5to argumento"
         return 1
     fi
 
@@ -120,6 +122,85 @@ dl_music() {
     echo "🎵 Descargando: $TITULO"
     echo "🎤 Artista: $ARTISTA"
     echo "📁 Destino: $FULL_PATH"
+
+    # ============================================
+    # Descarga con video (si WITH_VIDEO="video")
+    # ============================================
+    if [ "$WITH_VIDEO" = "video" ]; then
+        echo "🎬 MODE: Descargando VIDEO + AUDIO"
+        
+        local VIDEO_FILENAME="${ARTISTA} - ${TITULO}.mp4"
+        local VIDEO_PATH="$FULL_DIR/$VIDEO_FILENAME"
+        
+        # Descargar video: best video + best audio, merge to mp4
+        if yt-dlp -f "bestvideo+bestaudio" --merge-output-format mp4 -o "$VIDEO_PATH" "$URL" 2>/dev/null; then
+            echo "✅ Video descargado: $VIDEO_PATH"
+        else
+            echo "⚠️ Error descargando video, intentando solo audio..."
+        fi
+        
+        # También descargar audio MP3 (para tener ambas opciones)
+        echo "🎵 Descargando también audio..."
+        
+        # Las mismas 7 estrategias de audio...
+        if yt-dlp -x --audio-format mp3 --audio-quality 0 --extractor-args "youtube:player_client=android" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+            echo "✅ Audio descargado con cliente Android"
+        elif yt-dlp -x --audio-format mp3 --audio-quality 0 -o "$FULL_PATH" "$URL" 2>/dev/null; then
+            echo "✅ Audio descargado con método estándar"
+        elif yt-dlp -x --audio-format mp3 --audio-quality 0 --format "bestaudio[ext=m4a]/bestaudio/best" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+            echo "✅ Audio descargado con formato m4a/best"
+        elif yt-dlp -x --audio-format mp3 --audio-quality 0 --format "bestaudio" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+            echo "✅ Audio descargado con bestaudio"
+        elif yt-dlp -x --audio-format mp3 --audio-quality 0 --extractor-args "youtube:player_client=android" --format "bestaudio" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+            echo "✅ Audio descargado con Android + bestaudio"
+        elif yt-dlp -x --audio-format mp3 --audio-quality 0 --extractor-args "youtube:formats=missing_pot" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+            echo "✅ Audio descargado con SABR workaround"
+        elif yt-dlp -x --audio-format mp3 --audio-quality 0 --extractor-args "youtube:formats=missing_pot" --format "best" -o "$FULL_PATH" "$URL" 2>/dev/null; then
+            echo "✅ Audio descargado con best + SABR workaround"
+        else
+            echo "❌ Todas las estrategias de audio fallaron"
+            return 1
+        fi
+        
+        # Agregar thumbnail (same as original)
+        local THUMBNAIL_FILE=""
+        echo "🖼️  Descargando thumbnail de YouTube..."
+        THUMBNAIL_FILE="/tmp/thumbnail_${VIDEO_ID}.jpg"
+        if curl -s -L "$THUMBNAIL_URL" -o "$THUMBNAIL_FILE"; then
+            if file "$THUMBNAIL_FILE" | grep -q "image"; then
+                echo "✅ Thumbnail descargada exitosamente"
+            else
+                echo "⚠️ Thumbnail no disponible"
+                rm -f "$THUMBNAIL_FILE"
+                THUMBNAIL_FILE=""
+            fi
+        else
+            echo "⚠️ Error al descargar thumbnail"
+            THUMBNAIL_FILE=""
+        fi
+        
+        # Taggear el audio (no el video, es más complejo)
+        if [ -n "$THUMBNAIL_FILE" ] && [ -f "$THUMBNAIL_FILE" ]; then
+            local TEMP_FILE="${FULL_PATH}.temp.mp3"
+            ffmpeg -i "$FULL_PATH" -i "$THUMBNAIL_FILE" -map 0:a -map 1:v \
+                -c:a copy -c:v mjpeg -disposition:v attached_pic \
+                -metadata title="$TITULO" -metadata artist="$ARTISTA" -metadata album="$GENRE_DIR" \
+                -metadata genre="$(echo $GENRE_DIR | sed 's/_/ /g')" -metadata date="$(date +%Y)" \
+                "$TEMP_FILE" -y -v quiet
+            if [ $? -eq 0 ]; then
+                mv "$TEMP_FILE" "$FULL_PATH"
+                echo "✅ Audio taggeado con artwork"
+            fi
+            rm -f "$THUMBNAIL_FILE"
+        fi
+        
+        echo "✅ Descarga completa (video + audio)"
+        return 0
+    fi
+
+    # ============================================
+    # Original: solo audio (MP3)
+    # ============================================
 
     local THUMBNAIL_FILE=""
     echo "🖼️  Descargando thumbnail de YouTube..."

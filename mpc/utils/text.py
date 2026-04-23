@@ -35,6 +35,53 @@ def strip_accents(s: str) -> str:
     )
 
 
+# macOS/APFS permite ? y " en filenames — los mantenemos para preservar títulos
+# (ej. "¿por qué?"). Si se sincroniza a Windows, fix-metadata puede extenderse
+# con un flag estricto.
+_FS_RESERVED = set('/\\:*<>|')
+
+
+def sanitize_filename_component(s: str) -> str:
+    """
+    SSOT: sanitizer único para metadatos consistentes en BD, tag y filename.
+
+    Orden de operaciones:
+      1. Title-case (conserva siglas como NG, FANIA, DJ y minúsculas como de/la/el/y)
+      2. Reemplaza caracteres reservados por filesystem (/ \\ : * < > |) con ' - '
+      3. Colapsa whitespace múltiple y separadores ' - ' duplicados
+      4. Normaliza a Unicode NFC (precompuesto) — evita mismatches con NFD de macOS
+
+    Preserva unicode/acentos.
+    """
+    if not s:
+        return ""
+    s = title_case_keep_caps(s)
+    out = []
+    for c in s:
+        if c in _FS_RESERVED:
+            out.append(" - ")
+        else:
+            out.append(c)
+    result = "".join(out)
+    result = re.sub(r"\s+", " ", result)
+    result = re.sub(r"(\s*-\s*){2,}", " - ", result)
+    result = result.strip(" -")
+    # Normalizar a NFC — fix para comparaciones contra filenames NFD de macOS
+    return unicodedata.normalize("NFC", result)
+
+
+def nfc(s: str) -> str:
+    """Normaliza string a Unicode NFC. Helper para comparaciones robustas."""
+    return unicodedata.normalize("NFC", s or "")
+
+
+def canonical_filename(artist: str, title: str, ext: str) -> str:
+    """Nombre canónico garantizado consistente entre pipeline y fixers."""
+    a = sanitize_filename_component(artist)
+    t = sanitize_filename_component(title)
+    return f"{a} - {t}{ext}"
+
+
 def normalize_spaces(s: str) -> str:
     s = unicodedata.normalize("NFKC", s or "")
     return re.sub(r"\s+", " ", s.strip())
@@ -86,6 +133,36 @@ def norm_key(artist: str, title: str) -> str:
     return f"{simp_pipeline(artist)}|{simp_pipeline(title)}"
 
 
+def sanitize_filename(text: str) -> str:
+    """Normaliza nombre de archivo: Title Case, sin chars especiales."""
+    if not text:
+        return text
+    # NO quitar acentos - solo chars que crean carpetas
+    # Quitar caracteres inválidos para文件名: < > : " / \ | ? * + #
+    s = re.sub(r'[<>:"/\\|?*+#]', "", text)
+    # Quitar comillas simples y dobles
+    s = re.sub(r"['\"]", "", s)
+    # Quitar paréntesis y corchetes - podem crear carpetas
+    s = re.sub(r"[\[\]()]", "", s)
+    # Quitar signos ¿ ¡ (no tildes)
+    s = re.sub(r"[¿¡!]", "", s)
+    # Title case (conserva mayúsculas de siglas)
+    s = title_case_keep_caps(s)
+    # Espacios múltiples a uno
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _cap_first_letter(w: str) -> str:
+    """Lowercase + capitaliza la primera LETRA real, saltando puntuación inicial.
+    Ej: '¡cubanismo!' → '¡Cubanismo!', '(live)' → '(Live)', '¿por?' → '¿Por?'."""
+    w = w.lower()
+    for i, c in enumerate(w):
+        if c.isalpha():
+            return w[:i] + c.upper() + w[i + 1:]
+    return w
+
+
 def title_case_keep_caps(text: str) -> str:
     text = normalize_spaces(text)
     if not text:
@@ -99,10 +176,10 @@ def title_case_keep_caps(text: str) -> str:
             out.append(w)
             continue
         base = w.lower()
-        out.append(
-            base if (i > 0 and base in LOWER_EXCEPTIONS)
-            else base[:1].upper() + base[1:]
-        )
+        if i > 0 and base in LOWER_EXCEPTIONS:
+            out.append(base)
+        else:
+            out.append(_cap_first_letter(w))
     return " ".join(out)
 
 

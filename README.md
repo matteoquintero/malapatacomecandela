@@ -1,30 +1,32 @@
 # Mala Pata Come Candela – Sistema de música
 
-Genera `canciones.csv` a partir de pedidos en lenguaje natural o playlists de Spotify, busca ID en YouTube, clasifica en 16 géneros afrolatinos y descarga el audio con metadatos.
+Pipeline completo: genera `canciones.csv` desde pedidos naturales o Spotify, busca en YouTube, clasifica en 21 géneros afrolatinos, descarga audio con metadatos, y ofrece curación quirúrgica BD↔disco (auditoría, duplicados, thumbnails, tags, renames, reconciliación).
 
-## Estructura
+## Arquitectura
 
 ```
-mpc/                     # Paquete principal
-  catalog/genres.py      # Única fuente de verdad de géneros
-  planner/               # Interpretación de pedidos (intent + LLM)
-  sources/               # Clientes API: Discogs, MusicBrainz, Spotify, OpenAI
-  builders/              # Construcción de playlists y álbumes
-  utils/                 # text.py, csv_io.py
-  config.py              # Config desde .env
-  cli.py                 # CLI unificado (subcomandos)
+mpc/
+  catalog/        # Géneros (ALL_SLUGS, GENRE_DB, Genre value object)
+  discovery/     # BC1: interpreta pedido → canciones.csv
+  acquisition/   # BC2: pipeline de descarga (yt-dlp + tags + classifier)
+  library/       # BC3: SQLite (TrackRepository, LibraryIndex)
+  curator/       # Auditoría + reparación (reemplaza al antiguo `doctor`)
+  sources/       # Clientes: Discogs, MusicBrainz, Spotify, OpenAI
+  utils/         # text.py (SSOT sanitizer), csv_io.py
+  config.py      # Config desde .env
+  cli.py         # CLI unificado
 
-mala_pata.py             # Entry point: mala-pata create/download/delete/list/genres
-pipeline_music.py        # Pipeline de descarga (YouTube → CLASSIFY → dl)
-dl-music-system.sh       # Descarga por género con metadatos/thumbnail
-delete_song.py           # Elimina canción del manifest y disco
+mala_pata.py     # Entry point
+scripts/         # pipeline_music.py, audit_library.py, dl-music-system.sh
+cache/library.db # Fuente única de verdad (SQLite)
 ```
 
 ## Requisitos
 
 - Python 3.10+
 - `ffmpeg` y `yt-dlp` en PATH
-- (Opcional) API keys: YouTube Data v3, OpenAI; token Discogs; credenciales Spotify
+- (Opcional) API keys: OpenAI; token Discogs; credenciales Spotify
+- (Opcional) `mutagen` para tags/thumbnails
 
 ## Instalación
 
@@ -33,14 +35,15 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp env.example .env        # editar rutas y API keys
-chmod +x dl-music-system.sh
-source shell_setup.zsh     # cargar aliases (en .zshrc o a mano)
+chmod +x scripts/dl-music-system.sh
 ```
 
 ## Uso rápido
 
+### Generar CSV de tracks a descargar
+
 ```bash
-# Generar lista desde lenguaje natural
+# Lenguaje natural
 mala-pata create "10 canciones de salsa dura underground"
 mala-pata create "5 de Héctor Lavoe"
 mala-pata create --artist "Ray Barretto" -n 8
@@ -50,61 +53,95 @@ mala-pata create --spotify https://open.spotify.com/playlist/XXXX
 
 # Ver el plan sin ejecutar
 mala-pata create "10 mambos comerciales" --dry-run
+```
 
-# Descargar
-mala-pata download          # ≡ come-candela
+### Descargar audio y video
 
-# Borrar una canción
+```bash
+mala-pata audios                    # procesa data/canciones.csv, baja MP3
+mala-pata audios --input lista.csv  # otro CSV
+mala-pata audios --curator          # baja solo tracks marcados en BD
+
+mala-pata videos                    # descarga MP4 interactivo (y/n/s)
+mala-pata videos --all              # sin preguntar
+mala-pata videos --curator          # video_status='needs_video' en BD
+```
+
+### Curator — auditoría + reparación
+
+```bash
+mala-pata curator audit                # escanea disco + BD, pobla flags
+mala-pata curator status               # dashboard AUDIO + VIDEO separados
+mala-pata curator fix-duplicates       # borra duplicados (interactivo)
+mala-pata curator fix-metadata --apply # sincroniza filename + tags + BD
+mala-pata curator fix-genres           # mueve a carpeta correcta
+mala-pata curator fix-thumbnails       # cadena CAA → audio_source → video_source
+mala-pata curator fix-video-thumbnails # covr atom en MP4 desde YouTube
+mala-pata curator fix-tags             # completa tags ID3 faltantes
+mala-pata curator backfill-mbid        # rellena MusicBrainz IDs
+mala-pata curator backfill-audio-source-id  # busca audio_source_id en YouTube
+mala-pata curator reconcile            # huérfanos / fantasmas (audio + video)
+```
+
+### Otros
+
+```bash
 mala-pata delete --filename "NG La Banda - Santa Palabra.mp3"
-
-# Utilidades
-mala-pata list
-mala-pata genres
+mala-pata list                         # muestra canciones.csv
+mala-pata genres                       # lista géneros disponibles
+mala-pata classifier-stats             # distribución + confidence
 ```
 
 ## Configuración (.env)
 
 | Variable | Descripción |
 |---|---|
-| `LIB_BASE_DIR` | Base de tu librería de música |
-| `DL_MUSIC_SCRIPT` | Ruta a `dl-music-system.sh` |
-| `MANIFEST_FILE` | Registro de descargas |
-| `SEARCH_MODE` | `no_api_first` \| `api_first` \| `no_api_only` \| `api_only` |
+| `LIB_BASE_DIR` | Base de la librería de música |
+| `LIBRARY_DB` | SQLite path (default `cache/library.db`) |
+| `DL_MUSIC_SCRIPT` | Ruta a `scripts/dl-music-system.sh` |
 | `CLASSIFIER_MODE` | `LLM_FALLBACK` \| `HEURISTIC_ONLY` \| `LLM_ONLY` |
-| `OPENAI_API_KEY` | Opcional — mejora planner y clasificador |
-| `YOUTUBE_API_KEY` | Opcional — búsquedas más precisas |
+| `OPENAI_API_KEY` | Opcional — planner + clasificador LLM |
 | `DISCOGS_TOKEN` | Opcional — mejores resultados en create |
-| `SPOTIFY_*` | Opcional — importar playlists/álbumes |
+| `SPOTIFY_CLIENT_ID/SECRET` | Opcional — importar playlists |
 
-Sin `YOUTUBE_API_KEY` el sistema usa yt-dlp (`SEARCH_MODE=no_api_first`).
-Sin `OPENAI_API_KEY` usa el planner heurístico y `CLASSIFIER_MODE=HEURISTIC_ONLY`.
+Sin `OPENAI_API_KEY`, el sistema usa planner heurístico y `CLASSIFIER_MODE=HEURISTIC_ONLY`.
 
-## Aliases disponibles (shell_setup.zsh)
+## Flujo típico completo
 
-| Alias | Comando |
-|---|---|
-| `mala-pata` | `mala_pata.py` |
-| `come-candela` | `mala-pata download` |
-| `mala-candela` | `mala-pata delete --filename` |
-| `mala-pata-spotify` | `mala-pata create --spotify` |
-
-## Problemas comunes
-
-**Errores SABR / "format not available":**
 ```bash
-./test_sabr_streaming.sh VIDEO_ID
-pip install --upgrade yt-dlp
+# 1. Generar lista
+mala-pata create "20 canciones de timba"
+
+# 2. Descargar audio
+mala-pata audios
+
+# 3. Auditar estado
+mala-pata curator audit
+mala-pata curator status
+
+# 4. Reparar lo que haga falta (en orden sugerido)
+mala-pata curator fix-duplicates
+mala-pata curator fix-metadata --apply
+mala-pata curator backfill-mbid
+mala-pata curator fix-thumbnails
+mala-pata curator reconcile
+
+# 5. Si querés videos
+mala-pata videos --curator
+mala-pata curator fix-video-thumbnails
 ```
 
-**Sin cuota YouTube:**
-```bash
-./configure_no_api.sh
-# o manualmente: SEARCH_MODE=no_api_only en .env
-```
+## Reglas de diseño
 
-## Documentación
+- **BD es fuente de verdad única**. Disco y tags se sincronizan contra BD.
+- **Single sanitizer** (`sanitize_filename_component`): BD.artist/title, tag y filename son **literalmente el mismo string** (title-case, NFC, sin `/\\:*<>|`).
+- **TALB (álbum) = nombre real del álbum** (resuelto vía MusicBrainz → Discogs → LLM → vacío). **TCON (género) = nombre legible del género** (desde `GENRE_DB`).
+- **Audio y video separados**: `curator_status` (audio) y `video_status` (video) son columnas independientes.
+- **Fuentes separadas**: `audio_source_id` ≠ `video_source_id` (distintos videos YouTube para MP3 vs MP4).
 
-Ver `documentation/` para referencia completa de APIs, flujos y ejemplos.
+## Documentación extendida
+
+Ver `documentation/` para referencia completa.
 
 ## Licencia
 

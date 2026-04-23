@@ -122,9 +122,6 @@ LIB_BASE_DIR=/Users/tuusuario/Music/mala_pata_come_candela
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o-mini
 
-# YouTube Data API (para búsquedas mejoradas)
-YOUTUBE_API_KEY=AIza...
-
 # Discogs (para mejores resultados)
 DISCOGS_TOKEN=tu_token_discogs
 
@@ -137,15 +134,9 @@ SPOTIFY_REDIRECT_URI=https://localhost:8080/callback
 #### Configuración de Búsqueda
 
 ```bash
-# Modo de búsqueda
-SEARCH_MODE=no_api_first  # no_api_first | api_first | no_api_only | api_only
-
 # Fuentes sin API
 NOAPI_SOURCES=ytsearch,scsearch
-
-# Presupuesto YouTube API
-YOUTUBE_CALL_BUDGET=4000000
-YOUTUBE_MAX_RESULTS=5
+YTDLP_BIN=yt-dlp
 ```
 
 #### Configuración de Clasificación
@@ -203,24 +194,7 @@ malapatacomecandela_system/
 
 ## Configuración de APIs
 
-### 1. YouTube Data API v3
-
-#### Obtener API Key
-
-1. Ir a [Google Cloud Console](https://console.cloud.google.com/)
-2. Crear nuevo proyecto o seleccionar existente
-3. Habilitar YouTube Data API v3
-4. Crear credenciales (API Key)
-5. Configurar restricciones (opcional)
-
-#### Configurar en .env
-
-```bash
-YOUTUBE_API_KEY=AIzaSyC...tu_api_key_aqui
-YOUTUBE_CALL_BUDGET=4000000  # 4M unidades (gratis)
-```
-
-### 2. OpenAI API
+### 1. OpenAI API
 
 #### Obtener API Key
 
@@ -237,7 +211,7 @@ OPENAI_API_KEY=sk-...tu_api_key_aqui
 OPENAI_MODEL=gpt-4o-mini  # Modelo recomendado
 ```
 
-### 3. Discogs API
+### 2. Discogs API
 
 #### Obtener Token
 
@@ -252,7 +226,7 @@ OPENAI_MODEL=gpt-4o-mini  # Modelo recomendado
 DISCOGS_TOKEN=tu_token_discogs_aqui
 ```
 
-### 4. Spotify API
+### 3. Spotify API
 
 #### Configurar Aplicación
 
@@ -435,10 +409,6 @@ pip install yt-dlp
 ```bash
 # Verificar .env
 cat .env | grep API_KEY
-
-# Verificar variables de entorno
-source .env
-echo $YOUTUBE_API_KEY
 ```
 
 #### 5. Error de Espacio en Disco

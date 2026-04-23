@@ -28,14 +28,13 @@ def setup_logging(verbose: int = 0):
         level=level,
     )
     # Silenciar loggers ruidosos de terceros
-    for noisy in ("urllib3", "httpx", "httpcore", "spotipy", "googleapiclient"):
+    for noisy in ("urllib3", "httpx", "httpcore", "spotipy"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 @dataclass
 class Config:
     # ── APIs ──────────────────────────────────────────────────────────────────
-    youtube_api_key: str = ""
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     discogs_token: str = ""
@@ -48,26 +47,24 @@ class Config:
     # ── Rutas ─────────────────────────────────────────────────────────────────
     dl_music_script: str = ""
     lib_base_dir: str = ""
-    manifest_file: str = ""
+    library_db: str = ""
     channel_cache_file: str = ""
     search_cache_file: str = ""
     genre_ref_path: str = ""
 
     # ── Búsqueda ─────────────────────────────────────────────────────────────
-    search_mode: str = "no_api_first"
     noapi_sources: List[str] = field(default_factory=lambda: ["ytsearch", "scsearch"])
     ytdlp_bin: str = "yt-dlp"
-    disable_api_fallback: bool = False
-    youtube_max_results: int = 5
-    youtube_call_budget: int = 4_000_000
     channel_cache_ttl_days: int = 30
     search_cache_ttl_days: int = 45
-    min_subs_generic_channel: int = 30_000
 
     # ── Clasificador ─────────────────────────────────────────────────────────
     classifier_mode: str = "LLM_FALLBACK"   # LLM_FALLBACK | HEURISTIC_ONLY | LLM_ONLY
     pass_heuristic_to_llm: bool = False
     low_conf_threshold: float = 0.80
+
+    # ── Enrichment (MusicBrainz/Discogs antes del clasificador) ───────────────
+    enrichment_enabled: bool = True
 
     # ── Debug ─────────────────────────────────────────────────────────────────
     debug: bool = False
@@ -100,7 +97,6 @@ class Config:
 
         cache_dir = str(PROJECT_DIR / "cache")
         return cls(
-            youtube_api_key=_p("YOUTUBE_API_KEY", ""),
             openai_api_key=_p("OPENAI_API_KEY", ""),
             openai_model=_p("OPENAI_MODEL", "gpt-4o-mini"),
             discogs_token=_p("DISCOGS_TOKEN", ""),
@@ -112,24 +108,21 @@ class Config:
 
             dl_music_script=_p("DL_MUSIC_SCRIPT", str(PROJECT_DIR / "scripts" / "dl-music-system.sh")),
             lib_base_dir=_p("LIB_BASE_DIR", str(Path.home() / "Music/mala_pata_come_candela")),
-            manifest_file=_p("MANIFEST_FILE", f"{cache_dir}/manifest.csv"),
+            library_db=_p("LIBRARY_DB", f"{cache_dir}/library.db"),
             channel_cache_file=_p("CHANNEL_CACHE_FILE", f"{cache_dir}/yt_channel_cache.json"),
             search_cache_file=_p("SEARCH_CACHE_FILE", f"{cache_dir}/yt_search_cache.json"),
             genre_ref_path=_p("GENRE_REF_PATH", ""),
 
-            search_mode=_p("SEARCH_MODE", "no_api_first").strip().lower(),
             noapi_sources=[s.strip() for s in _p("NOAPI_SOURCES", "ytsearch,scsearch").split(",") if s.strip()],
             ytdlp_bin=_p("YTDLP_BIN", "yt-dlp"),
-            disable_api_fallback=_bool("DISABLE_API_FALLBACK", False),
-            youtube_max_results=_int("YOUTUBE_MAX_RESULTS", 5),
-            youtube_call_budget=_int("YOUTUBE_CALL_BUDGET", 4_000_000),
             channel_cache_ttl_days=_int("CHANNEL_CACHE_TTL_DAYS", 30),
             search_cache_ttl_days=_int("SEARCH_CACHE_TTL_DAYS", 45),
-            min_subs_generic_channel=_int("MIN_SUBS_FOR_GENERIC_CHANNEL", 30_000),
 
             classifier_mode=_p("CLASSIFIER_MODE", "LLM_FALLBACK"),
             pass_heuristic_to_llm=_bool("PASS_HEURISTIC_TO_LLM", False),
             low_conf_threshold=float(_p("LOW_CONF_THRESHOLD", "0.80")),
+
+            enrichment_enabled=_bool("ENRICHMENT_ENABLED", True),
 
             debug=_bool("DEBUG_MODE", False),
             default_csv=_p("DEFAULT_CSV", str(PROJECT_DIR / "data" / "canciones.csv")),
